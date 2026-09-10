@@ -58,7 +58,7 @@
 	<!-- Rail -->
 	<aside class="flex flex-col justify-between border-b border-warm-200 bg-ink p-8 md:w-80 md:border-b-0 md:border-r">
 		<div>
-			<Logo size={30} />
+			<Logo size={30} tone="light" />
 			<h1 class="accent-serif mt-8 text-3xl leading-tight text-white">Let's set up<br />your print lab.</h1>
 			<p class="mt-3 text-sm text-warm-300">A few quick steps and your students can start printing.</p>
 

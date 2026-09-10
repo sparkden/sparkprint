@@ -1,5 +1,9 @@
 <script lang="ts">
-	let { size = 28, showText = true }: { size?: number; showText?: boolean } = $props();
+	let {
+		size = 28,
+		showText = true,
+		tone = 'ink'
+	}: { size?: number; showText?: boolean; tone?: 'ink' | 'light' } = $props();
 </script>
 
 <span class="inline-flex items-center gap-2 select-none">
@@ -22,7 +26,7 @@
 	</svg>
 	{#if showText}
 		<span
-			class="font-display text-[1.15rem] font-semibold tracking-tight text-ink"
+			class="font-display text-[1.15rem] font-semibold tracking-tight {tone === 'light' ? 'text-paper' : 'text-ink'}"
 			style="font-family: var(--font-display)"
 		>
 			Spark<span class="text-spark">Print</span>
