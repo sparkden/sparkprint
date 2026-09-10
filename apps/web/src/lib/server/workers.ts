@@ -17,6 +17,7 @@ import { db } from './db';
 import { printJobs, models } from './db/schema';
 import { objectFsPath, putBuffer } from './storage';
 import { realSlice, slicerAvailable } from './slicer-cli';
+import { ensureSlicer } from './ensure-slicer';
 
 const g = globalThis as unknown as { __sparkWorkers?: boolean };
 
@@ -26,9 +27,17 @@ async function sliceJob(jobId: string) {
 	const [model] = await db.select().from(models).where(eq(models.id, job.modelId)).limit(1);
 	if (!model) return;
 
+	const proc = (job.process ?? {}) as Record<string, unknown>;
+	const settings = {
+		layerHeightMm: Number(proc.layerHeightMm ?? job.layerHeightMm ?? 0.2),
+		infillPct: Number(proc.infillPct ?? job.infillPct ?? 15),
+		supports: Boolean(proc.supports ?? job.supports),
+		raft: Boolean(proc.raft),
+		adhesion: typeof proc.adhesion === 'string' ? proc.adhesion : undefined
+	};
 	let result;
 	try {
-		result = await realSlice(objectFsPath(model.fileKey));
+		result = await realSlice(objectFsPath(model.fileKey), settings);
 	} catch (e) {
 		await logEvent(jobId, 'slice', `Slicer error: ${(e as Error).message}. Using the size estimate.`);
 		return; // stays assigned/queued — not stuck
@@ -70,5 +79,6 @@ export async function startWorkers() {
 		}
 	});
 
+	ensureSlicer().catch(() => {}); // warm up / install the bundled slicer in the background
 	slicerAvailable().then((s) => console.log(`[queue] workers started · slicer: ${s ?? 'none (size-estimate fallback)'}`));
 }

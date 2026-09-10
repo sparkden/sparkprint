@@ -117,6 +117,7 @@
 				gg.traverse((c: any) => { if (c.isMesh && !geometry) geometry = c.geometry; });
 			} else throw new Error('Unsupported file. Use STL, OBJ, or 3MF.');
 			if (!geometry) throw new Error('No printable mesh found.');
+			if (typeof pushUndo === 'function') pushUndo();
 			addGeometry(geometry, file.name.replace(/\.(stl|obj|3mf)$/i, ''));
 		} catch (e: any) {
 			errorMsg = e?.message ?? 'Could not load model.';
@@ -138,10 +139,11 @@
 		removeObject(selectedId);
 	}
 	function removeObject(id: string) {
+		if (typeof pushUndo === 'function') pushUndo();
 		const m = meshes.get(id);
 		if (m) {
 			if (gizmo && selectedId === id) gizmo.detach();
-			scene.remove(m); m.geometry.dispose(); m.material.dispose();
+			scene.remove(m); m.material.dispose(); // keep geometry for undo
 		}
 		meshes.delete(id);
 		objects = objects.filter((o) => o.id !== id);
@@ -152,6 +154,7 @@
 		if (!selectedId) return;
 		const src = meshes.get(selectedId); const row = objects.find((o) => o.id === selectedId);
 		if (!src || !row) return;
+		pushUndo();
 		addGeometry(src.geometry.clone().applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)), row.name + ' copy');
 		// (re-bake to Z-up first so addGeometry's -90 X restores orientation)
 	}
@@ -174,9 +177,11 @@
 		}
 		emitStats();
 	}
+	function arrange() { if (typeof pushUndo === 'function') pushUndo(); autoArrange(); }
 	function layFlatSelected() {
 		const m = selectedId && meshes.get(selectedId);
 		if (!m) return;
+		if (typeof pushUndo === 'function') pushUndo();
 		m.rotation.set(0, 0, 0);
 		dropToPlate(m);
 		updateSelInfo(); emitStats();
@@ -184,6 +189,7 @@
 	function mirrorSelected(axis: 'x' | 'y' | 'z') {
 		const m = selectedId && meshes.get(selectedId);
 		if (!m) return;
+		if (typeof pushUndo === 'function') pushUndo();
 		m.scale[axis] *= -1;
 		dropToPlate(m); updateSelInfo(); emitStats();
 	}
@@ -255,6 +261,41 @@
 	$effect(() => { for (const o of objects) { const m = meshes.get(o.id); if (m) m.material.color = new THREE.Color(colorHex); } void colorHex; });
 	$effect(() => { plate.x; plate.y; if (THREE && scene) buildPlate(); });
 
+	// ── Undo / redo + snapping ────────────────────────────────────────────────
+	type Snap = { id: string; name: string; geo: any; matrix: any; color: string };
+	let undoStack: Snap[][] = [];
+	let redoStack: Snap[][] = [];
+	let shiftDown = false;
+	let dragStartScale: any = null;
+
+	function snapshot(): Snap[] {
+		return objects.map((o) => { const m = meshes.get(o.id); m.updateMatrix(); return { id: o.id, name: o.name, geo: m.geometry, matrix: m.matrix.clone(), color: '#' + m.material.color.getHexString() }; });
+	}
+	function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 60) undoStack.shift(); redoStack = []; }
+	function restore(snap: Snap[]) {
+		const keep = new Set(snap.map((s) => s.id));
+		for (const [id, m] of [...meshes]) if (!keep.has(id)) { if (gizmo && selectedId === id) gizmo.detach(); scene.remove(m); meshes.delete(id); }
+		for (const s of snap) {
+			let m = meshes.get(s.id);
+			if (!m) { m = new THREE.Mesh(s.geo, new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: 0.5, metalness: 0.04 })); m.castShadow = true; m.userData.id = s.id; scene.add(m); meshes.set(s.id, m); }
+			m.matrix.copy(s.matrix); m.matrix.decompose(m.position, m.quaternion, m.scale); m.material.color = new THREE.Color(s.color);
+		}
+		objects = snap.map((s) => ({ id: s.id, name: s.name }));
+		if (selectedId && !keep.has(selectedId)) selectedId = objects[0]?.id ?? null;
+		select(selectedId);
+		emitStats();
+	}
+	function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()!); }
+	function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()!); }
+
+	function setShift(on: boolean) {
+		shiftDown = on;
+		if (gizmo?.setTranslationSnap) {
+			gizmo.setTranslationSnap(on ? 10 : null);
+			gizmo.setRotationSnap(on ? (15 * Math.PI) / 180 : null);
+		}
+	}
+
 	function onPointerDown(ev: PointerEvent) {
 		if (gizmo?.dragging) return;
 		const rect = renderer.domElement.getBoundingClientRect();
@@ -266,17 +307,24 @@
 	function onKey(e: KeyboardEvent) {
 		const t = e.target as HTMLElement;
 		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+		if (e.key === 'Shift') { setShift(true); return; }
 		const k = e.key.toLowerCase();
-		if (k === 'm') { applyMode('translate'); }
-		else if (k === 'r') { applyMode('rotate'); }
-		else if (k === 's') { applyMode('scale'); }
-		else if (k === 'a') { autoArrange(); }
-		else if (k === 'l') { layFlatSelected(); }
-		else if (k === 'escape') { select(null); }
+		const mod = e.ctrlKey || e.metaKey;
+		if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+		if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
+		if (mod && k === 'd') { e.preventDefault(); duplicateSelected(); return; }
+		if (mod) return;
+		if (k === 'm') applyMode('translate');
+		else if (k === 'r') applyMode('rotate');
+		else if (k === 's') applyMode('scale');
+		else if (k === 'a') arrange();
+		else if (k === 'l') layFlatSelected();
+		else if (k === 'f') frameCamera();
+		else if (k === 'escape') select(null);
 		else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeSelected(); }
-		else if (k === 'd' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); duplicateSelected(); }
 		else return;
 	}
+	function onKeyUp(e: KeyboardEvent) { if (e.key === 'Shift') setShift(false); }
 
 	onMount(() => {
 		let raf = 0, ro: ResizeObserver;
@@ -311,19 +359,41 @@
 			scene.add(gizmoHelper);
 			gizmo.addEventListener('dragging-changed', (e: any) => {
 				orbit.enabled = !e.value;
-				if (!e.value && selectedId) { const m = meshes.get(selectedId); if (m && mode !== 'translate') dropToPlate(m); updateSelInfo(); emitStats(); }
+				if (e.value) {
+					pushUndo();
+					const m = selectedId && meshes.get(selectedId);
+					dragStartScale = m ? m.scale.clone() : null;
+				} else if (selectedId) {
+					const m = meshes.get(selectedId);
+					if (m && mode !== 'translate') dropToPlate(m);
+					dragStartScale = null;
+					updateSelInfo(); emitStats();
+				}
 			});
-			gizmo.addEventListener('objectChange', () => { updateSelInfo(); });
+			gizmo.addEventListener('objectChange', () => {
+				// Shift while scaling → uniform (scale the whole thing, not one side).
+				if (shiftDown && mode === 'scale' && dragStartScale && selectedId) {
+					const m = meshes.get(selectedId);
+					if (m) {
+						const rs = [m.scale.x / dragStartScale.x, m.scale.y / dragStartScale.y, m.scale.z / dragStartScale.z];
+						let r = 1, best = 0;
+						for (const c of rs) if (Math.abs(c - 1) > best) { best = Math.abs(c - 1); r = c; }
+						m.scale.set(dragStartScale.x * r, dragStartScale.y * r, dragStartScale.z * r);
+					}
+				}
+				updateSelInfo();
+			});
 
 			const el = renderer.domElement;
 			el.addEventListener('pointerdown', onPointerDown);
 			window.addEventListener('keydown', onKey);
+			window.addEventListener('keyup', onKeyUp);
 
 			function resize() { const w = container.clientWidth, h = container.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 			ro = new ResizeObserver(resize); ro.observe(container); resize();
 			(function animate() { raf = requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); })();
 		})();
-		return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener('keydown', onKey); renderer?.dispose?.(); if (renderer?.domElement && container?.contains(renderer.domElement)) container.removeChild(renderer.domElement); };
+		return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); renderer?.dispose?.(); if (renderer?.domElement && container?.contains(renderer.domElement)) container.removeChild(renderer.domElement); };
 	});
 
 	const tools = [
@@ -349,7 +419,10 @@
 			{/each}
 			<span class="my-0.5 h-px w-full bg-warm-200"></span>
 			<button type="button" title="Lay flat (L)" onclick={layFlatSelected} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="layers" size={18} /></button>
-			<button type="button" title="Auto-arrange (A)" onclick={autoArrange} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="dashboard" size={18} /></button>
+			<button type="button" title="Auto-arrange (A)" onclick={arrange} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="dashboard" size={18} /></button>
+			<span class="my-0.5 h-px w-full bg-warm-200"></span>
+			<button type="button" title="Undo (Ctrl+Z)" onclick={undo} class="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-soft-ink hover:bg-warm-100">↶</button>
+			<button type="button" title="Redo (Ctrl+Y)" onclick={redo} class="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-soft-ink hover:bg-warm-100">↷</button>
 		</div>
 
 		<!-- Object list -->
@@ -382,7 +455,7 @@
 
 		<!-- Shortcut hint -->
 		<div class="pointer-events-none absolute bottom-3 right-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[10px] text-muted-ink backdrop-blur">
-			M move · R rotate · S scale · A arrange · L flat · Del delete
+			M/R/S move·rotate·scale · A arrange · L flat · Del delete · Ctrl+Z/Y undo/redo · Shift = snap / uniform
 		</div>
 	{/if}
 </div>

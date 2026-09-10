@@ -132,18 +132,32 @@ class BambuManager {
 	requestStatus(printerId: string) {
 		return this.command(printerId, { pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }, 0);
 	}
-	/** Unload the currently-loaded filament back into the AMS (target 255 = unload). */
+	/**
+	 * Unload the currently-loaded filament (target 255), exactly as BambuStudio's
+	 * command_ams_change_filament does — with the classic (target/curr_temp/tar_temp) and
+	 * new-protocol (ams_id/slot_id 255) fields so it works on both firmwares. The printer
+	 * heats to tar_temp itself; no separate heat command. Requires the printer idle with
+	 * filament loaded. If it stalls mid-way, call amsControl(printerId, 'resume').
+	 */
 	unloadFilament(printerId: string) {
-		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'ams_change_filament', target: 255, curr_temp: 220, tar_temp: 220 } }, 1);
+		return this.command(
+			printerId,
+			{ print: { command: 'ams_change_filament', sequence_id: this.nextSeq(), target: 255, ams_id: 255, slot_id: 255, curr_temp: 210, tar_temp: 210 } },
+			1
+		);
+	}
+	/** Guide an in-progress AMS change: 'resume' | 'done' | 'reset' | 'pause'. */
+	amsControl(printerId: string, action: 'resume' | 'done' | 'reset' | 'pause') {
+		return this.command(printerId, { print: { command: 'ams_control', sequence_id: this.nextSeq(), param: action } }, 1);
 	}
 	pause(printerId: string) {
-		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'pause' } }, 1);
+		return this.command(printerId, { print: { command: 'pause', param: '', sequence_id: this.nextSeq() } }, 1);
 	}
 	resume(printerId: string) {
-		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'resume' } }, 1);
+		return this.command(printerId, { print: { command: 'resume', param: '', sequence_id: this.nextSeq() } }, 1);
 	}
 	stop(printerId: string) {
-		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'stop' } }, 1);
+		return this.command(printerId, { print: { command: 'stop', param: '', sequence_id: this.nextSeq() } }, 1);
 	}
 
 	isConnected(accountId: string) {
