@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+apps/web/build/
+apps/web/.svelte-kit/
+**/.svelte-kit/
+**/build/
+
+# runtime data + storage
+**/.data/
+.data/
+
+# secrets / env
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# logs / os
+*.log
+.DS_Store
+
+# scratch
+scratchpad/
+*.tsbuildinfo
+vite.config.ts.timestamp-*

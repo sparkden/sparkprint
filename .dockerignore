@@ -1,0 +1,14 @@
+**/node_modules
+**/.svelte-kit
+**/build
+**/.data
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+**/*.log
+PROGRESS.md
+start.sh
+**/.DS_Store
+scratchpad

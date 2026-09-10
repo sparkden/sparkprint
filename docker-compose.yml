@@ -1,0 +1,55 @@
+# Local full-stack. For Coolify, prefer the Dockerfile build pack and a managed
+# Postgres; this compose is for running everything on one box / locally.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sparkcloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sparkcloud}
+      POSTGRES_DB: sparkcloud
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sparkcloud']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sparkcloud:${POSTGRES_PASSWORD:-sparkcloud}@db:5432/sparkcloud
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET to a long random string}
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      BAMBU_MODE: ${BAMBU_MODE:-mock}
+      STORAGE_DIR: /data/storage
+    ports:
+      - '${PORT:-3000}:3000'
+    volumes:
+      - storage:/data
+
+  # Server-side slicer worker (OrcaSlicer). Shares the DB queue + storage volume.
+  slicer:
+    build:
+      context: .
+      dockerfile: services/slicer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sparkcloud:${POSTGRES_PASSWORD:-sparkcloud}@db:5432/sparkcloud
+      STORAGE_DIR: /data/storage
+    volumes:
+      - storage:/data
+
+volumes:
+  pgdata:
+  storage:

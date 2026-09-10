@@ -1,0 +1,15 @@
+{
+  "name": "@sparkprint/bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Bambu Lab bridge — cloud/LAN MQTT telemetry + print dispatch to printers.",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1",
+    "pg-boss": "^10.3.2",
+    "postgres": "^3.4.7"
+  }
+}

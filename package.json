@@ -1,0 +1,28 @@
+{
+  "name": "sparkprint",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @sparkprint/web",
+    "build": "npm run build -w @sparkprint/web",
+    "start": "node apps/web/build",
+    "db:generate": "drizzle-kit generate --config apps/web/drizzle.config.ts",
+    "db:migrate": "node apps/web/scripts/migrate.js",
+    "db:push": "drizzle-kit push --config apps/web/drizzle.config.ts"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.5"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@sparkprint/slicer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Headless slicing worker — consumes slice jobs and runs the BambuStudio/OrcaSlicer CLI.",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "pg-boss": "^10.3.2",
+    "postgres": "^3.4.7"
+  }
+}
