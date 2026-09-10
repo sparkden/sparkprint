@@ -127,7 +127,10 @@ const MODEL_MAP: Record<string, BambuDeviceModel> = {
 	'A1 mini': 'A1M',
 	'A1M': 'A1M',
 	'H2D': 'H2D',
-	'H2': 'H2D'
+	'H2': 'H2D',
+	'H2C': 'H2C',
+	'O1C2-V2': 'H2C',
+	'H2S': 'H2S'
 };
 
 /** List devices bound to the authenticated account. AMS is filled later by MQTT reports. */

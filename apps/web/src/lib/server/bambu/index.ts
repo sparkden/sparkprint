@@ -4,7 +4,10 @@
  * and cloudprint.ts (print dispatch).
  */
 
-export type BambuDeviceModel = 'X1' | 'X1C' | 'X1E' | 'P1S' | 'P1P' | 'A1' | 'A1M' | 'H2D';
+// H2C/H2S are combo (laser/cutter) machines: we identify them so they aren't mistaken for a
+// plain FDM printer, but they can't be driven by the standard cloud FDM print task (see
+// isCloudPrintable in jobs.ts).
+export type BambuDeviceModel = 'X1' | 'X1C' | 'X1E' | 'P1S' | 'P1P' | 'A1' | 'A1M' | 'H2D' | 'H2C' | 'H2S';
 
 export type DiscoveredSlot = {
 	slotIndex: number;

@@ -105,6 +105,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 		.orderBy(desc(printers.priority), asc(printers.name));
 
 	for (const p of candidates) {
+		if (!isCloudPrintable(p.model)) continue; // skip combo/laser machines (e.g. H2C)
 		if (job.printerModelTarget && p.model !== job.printerModelTarget) continue;
 
 		const slots = await db
@@ -205,6 +206,17 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 // ── Assign a printer (color + priority) without slicing — the student-facing step ──
 // Picks the highest-priority enabled printer that has the requested color(s) loaded and
 // records the assignment. Returns the printer name so the UI can say "on Printer 4".
+/**
+ * Models we can both slice (OrcaSlicer machine profile exists) and drive via the standard Bambu
+ * cloud FDM print task. Combo/laser machines like the H2C reject that task with HTTP 403 ("no
+ * access rights to the content"), so they're excluded from auto-routing — jobs fall through to a
+ * compatible FDM printer instead of failing at dispatch.
+ */
+const CLOUD_PRINTABLE = new Set(['X1', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1M', 'H2D']);
+export function isCloudPrintable(model: string | null | undefined): boolean {
+	return !!model && CLOUD_PRINTABLE.has(model);
+}
+
 export async function assignPrinter(jobId: string): Promise<string | null> {
 	const [job] = await db.select().from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
 	if (!job) return null;
@@ -217,6 +229,7 @@ export async function assignPrinter(jobId: string): Promise<string | null> {
 		.orderBy(desc(printers.priority), asc(printers.name));
 
 	for (const p of candidates) {
+		if (!isCloudPrintable(p.model)) continue; // skip combo/laser machines (e.g. H2C)
 		if (job.printerModelTarget && p.model !== job.printerModelTarget) continue;
 		const slots = await db
 			.select({
