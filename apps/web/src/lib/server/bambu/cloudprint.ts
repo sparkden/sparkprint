@@ -55,6 +55,8 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 		const project: any = await createRes.json().catch(() => ({}));
 		const projectId = project.project_id ?? project.id;
 		const profileId = project.profile_id ?? '0';
+		// Cloud model id assigned to the project; /my/task requires it ("field modelId is not set").
+		const modelId = project.model_id ?? project.modelId ?? projectId;
 		const uploadUrl: string | undefined = project.upload_url ?? project.url;
 		if (!projectId) return { ok: false, error: 'create project: missing project_id' };
 		if (!uploadUrl) return { ok: false, error: 'create project: no presigned upload_url returned' };
@@ -90,6 +92,7 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 				dev_id: input.devId,
 				project_id: String(projectId),
 				profile_id: String(profileId),
+				model_id: String(modelId),
 				task_name: input.jobName,
 				subtask_name: input.jobName,
 				url: httpsUrl,
