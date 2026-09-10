@@ -1,4 +1,4 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createHash, createHmac, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 
 /**
@@ -19,6 +19,24 @@ function key(): Buffer {
 /** Deterministic hash for opaque high-entropy tokens (session ids). */
 export function sha256(input: string): string {
 	return createHash('sha256').update(input).digest('hex');
+}
+
+/** Sign an id → "<id>.<sig>" (base64url HMAC). Used for unauthenticated download URLs. */
+export function signId(id: string): string {
+	const sig = createHmac('sha256', key()).update(id).digest('base64url');
+	return `${id}.${sig}`;
+}
+/** Verify a "<id>.<sig>" token; returns the id if the signature matches, else null. */
+export function verifyId(token: string): string | null {
+	const dot = token.lastIndexOf('.');
+	if (dot <= 0) return null;
+	const id = token.slice(0, dot);
+	const sig = token.slice(dot + 1);
+	const expected = createHmac('sha256', key()).update(id).digest('base64url');
+	const a = Buffer.from(sig);
+	const b = Buffer.from(expected);
+	if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+	return id;
 }
 
 /** Encrypt a UTF-8 string → "v1.<iv>.<tag>.<ct>" (base64url). */

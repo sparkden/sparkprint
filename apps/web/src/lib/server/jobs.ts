@@ -16,10 +16,11 @@ import { getEstimator, type SliceInput } from './slicer';
 import { canSubmit } from './quota';
 import { BAMBU_MODE, region as normRegion } from './bambu/config';
 import { colorDistance } from '$lib/color';
-import { decrypt } from './crypto';
+import { decrypt, signId } from './crypto';
 import { readBuffer, objectExists } from './storage';
+import { publicOrigin } from './public-origin';
 import { enqueueSlice } from './queue';
-import { sendCloudPrint } from './bambu/cloudprint';
+import { sendCloudPrint, md5Hex } from './bambu/cloudprint';
 
 // ── Events / timeline ─────────────────────────────────────────────────────────
 export async function logEvent(
@@ -167,21 +168,30 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			continue;
 		}
 
+		// The printer downloads the sliced 3mf from a public URL we host; build it now. Without a
+		// known public origin the printer couldn't fetch the file, so hold the job rather than
+		// dispatch a link that will fail verification.
+		const origin = publicOrigin();
+		if (!origin) {
+			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: 'no public URL yet', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+			await logEvent(jobId, 'error', 'Cannot reach the printer yet — open SparkPrint in a browser (or set PRINT_PUBLIC_ORIGIN) so the printer can download the file.');
+			return 'queued';
+		}
 		const threeMf = await readBuffer(job.gcodeKey);
+		const fileUrl = `${origin}/api/print/${signId(jobId)}.gcode.3mf`;
 		// Bambu ams_mapping: index = filament slot in the 3mf; value = global AMS tray id (ams*4+slot).
 		const amsMapping = mapping.map((m) => m.amsIndex * 4 + m.slotIndex);
-		const amsMapping2 = mapping.map((m) => ({ ams_id: m.amsIndex, slot_id: m.slotIndex }));
 
 		const send = await sendCloudPrint({
 			accessToken: token,
 			region: normRegion(acct.region),
 			devId: p.devId,
 			jobName: job.name,
-			threeMfBytes: threeMf,
+			fileUrl,
+			md5: md5Hex(threeMf),
 			plateIdx: 1,
 			bedType: 'textured_plate',
-			amsMapping,
-			amsMapping2
+			amsMapping
 		});
 
 		if (!send.ok) {

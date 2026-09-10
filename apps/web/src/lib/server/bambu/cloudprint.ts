@@ -1,19 +1,21 @@
 /**
- * Cloud print dispatch — upload a sliced 3mf to Bambu's cloud and create a print task;
- * Bambu's cloud then forwards the `project_file` command to the printer over MQTT.
+ * Cloud print dispatch — tell Bambu's cloud to print a sliced 3mf that we host ourselves; the
+ * cloud forwards the task to the printer over MQTT and the printer downloads the file from our URL.
  *
- * Sequence (per ClusterM/open-bamboo-networking MITM of the official networking plugin):
- *   1. POST /v1/iot-service/api/user/project            → project_id, profile_id, model_id, upload_url
- *   2. PUT  <upload_url>  (the 3mf)   ⚠ send NO Content-Type header (presign signed empty)
- *   3. PATCH /v1/iot-service/api/user/project/<id>       → register {md5, plate_idx, https url}
- *   4. POST /v1/user-service/my/task  (camelCase body! headers: X-BBL-Client-Name: BambuStudio,
- *                                      X-BBL-OS-Type: linux)  → cloud dispatches the print
+ * Why we self-host the file: Bambu's presigned S3 upload bucket isn't readable by the printer
+ * (a bare object URL returns 403), and the documented create→upload→register handshake never
+ * produces a device-downloadable URL for us — so the printer reported "verification failed" when
+ * handed the S3 URL. Verified against the live API that /v1/user-service/my/task accepts an
+ * arbitrary `url` (an external example.com URL is accepted), so we pass a token-signed URL to our
+ * own /api/print/<token> endpoint. The printer fetches the exact bytes we sliced and verifies them
+ * against the `md5` we send with the task.
  *
- * ⚠ VALIDATION STATUS: built to the documented protocol but not yet confirmed against real
- * hardware. Secured (non-Developer-Mode) firmware additionally requires request signing
- * (`url_enc` RSA + HTTP PoP headers) which is undocumented; put the printer in Developer
- * Mode for the first runs. Every step returns a precise error string so dispatch() can log
- * it and the job can be retried after a fix. See docs/BAMBU.md.
+ * Sequence:
+ *   1. POST /v1/iot-service/api/user/project   → project_id, model_id, profile_id (ids only)
+ *   2. POST /v1/user-service/my/task           → cloud dispatches the print (camelCase body!)
+ *
+ * The task body is camelCase (unlike the snake_case iot-service endpoints); required keys, verified
+ * live, are modelId, title, profileId, cover, deviceId, plateIndex.
  */
 import { createHash } from 'node:crypto';
 import { REGIONS, type Region } from './config';
@@ -23,16 +25,16 @@ export type CloudPrintInput = {
 	region: Region;
 	devId: string;
 	jobName: string;
-	threeMfBytes: Buffer;
+	fileUrl: string; // printer-reachable https URL to the .gcode.3mf we host
+	md5: string; // uppercase md5 hex of the file at fileUrl
 	plateIdx: number;
 	bedType: string;
 	amsMapping: number[];
-	amsMapping2: { ams_id: number; slot_id: number }[];
 };
 
 export type CloudPrintResult = { ok: boolean; taskId?: string; error?: string };
 
-export function md5Hex(buf: Buffer): string {
+export function md5Hex(buf: Buffer | Uint8Array): string {
 	return createHash('md5').update(buf).digest('hex').toUpperCase();
 }
 
@@ -44,7 +46,7 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 	const api = REGIONS[input.region].api;
 
 	try {
-		// 1 ── Create a project (cloud file task).
+		// 1 ── Create a project purely to obtain the ids /my/task requires.
 		const createRes = await fetch(`${api}/v1/iot-service/api/user/project`, {
 			method: 'POST',
 			headers: authHeaders(input.accessToken, { 'content-type': 'application/json' }),
@@ -54,33 +56,10 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 		const project: any = await createRes.json().catch(() => ({}));
 		const projectId = project.project_id ?? project.id;
 		const profileId = project.profile_id ?? '0';
-		// Cloud model id assigned to the project; /my/task requires it ("field modelId is not set").
 		const modelId = project.model_id ?? project.modelId ?? projectId;
-		const uploadUrl: string | undefined = project.upload_url ?? project.url;
 		if (!projectId) return { ok: false, error: 'create project: missing project_id' };
-		if (!uploadUrl) return { ok: false, error: 'create project: no presigned upload_url returned' };
 
-		// 2 ── Upload the 3mf to the presigned URL. No Content-Type (presign signed empty).
-		const putRes = await fetch(uploadUrl, { method: 'PUT', body: new Uint8Array(input.threeMfBytes) });
-		if (!putRes.ok) return { ok: false, error: `upload 3mf HTTP ${putRes.status}` };
-		const httpsUrl = uploadUrl.split('?')[0]; // object URL without the signed query
-
-		// 3 ── Register the uploaded file on the project.
-		const md5 = md5Hex(input.threeMfBytes);
-		const patchRes = await fetch(`${api}/v1/iot-service/api/user/project/${projectId}`, {
-			method: 'PATCH',
-			headers: authHeaders(input.accessToken, { 'content-type': 'application/json' }),
-			body: JSON.stringify({
-				profile_id: profileId,
-				profile_print_3mf: [{ md5, plate_idx: input.plateIdx, url: httpsUrl }]
-			})
-		});
-		if (!patchRes.ok) return { ok: false, error: `register file HTTP ${patchRes.status}` };
-
-		// 4 ── Create the task; Bambu cloud dispatches `project_file` to the printer.
-		// NB: unlike the snake_case iot-service endpoints, /v1/user-service/my/task expects
-		// camelCase keys. Required (verified against the live API): modelId, title, profileId,
-		// cover, deviceId, plateIndex. The rest drive the actual print (url/md5/bedType/AMS).
+		// 2 ── Create the task; Bambu cloud dispatches to the printer, which downloads our fileUrl.
 		const taskRes = await fetch(`${api}/v1/user-service/my/task`, {
 			method: 'POST',
 			headers: authHeaders(input.accessToken, {
@@ -97,8 +76,8 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 				cover: '',
 				deviceId: input.devId,
 				plateIndex: input.plateIdx,
-				url: httpsUrl,
-				md5,
+				url: input.fileUrl,
+				md5: input.md5,
 				bedType: input.bedType,
 				useAms: input.amsMapping.length > 0,
 				amsMapping: input.amsMapping,
