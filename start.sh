@@ -82,6 +82,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Free $PORT first. Orphaned dev servers (e.g. from a previous run) holding the port make
+# the dev server silently bind a different port while the tunnel keeps targeting $PORT —
+# producing a dead public URL. Reclaim it so the app and tunnel always line up.
+free_port() {
+  local p="$1"
+  if command -v fuser >/dev/null 2>&1; then fuser -k "${p}/tcp" >/dev/null 2>&1 || true
+  elif command -v lsof  >/dev/null 2>&1; then lsof -ti tcp:"${p}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+  fi
+}
+echo "==> Ensuring port $PORT is free..."
+free_port "$PORT"
+sleep 1
+
 echo "==> Starting your app:  $APP_CMD"
 bash -c "$APP_CMD" &
 APP_PID=$!
