@@ -132,6 +132,13 @@ if [ -n "$URL" ]; then
   echo "  Your app is live at:   $URL"
   echo "============================================================"
   echo "  Press Ctrl-C to stop the app and tear down the tunnel."
+  # Record the public URL so cloud print can hand the Bambu printer a link it can download the
+  # sliced file from (the tunnel hides this from the server's Host header). Runs in the background
+  # so it never delays startup; reads DATABASE_URL from apps/web/.env.
+  (
+    set -a; [ -f apps/web/.env ] && . apps/web/.env; set +a
+    node apps/web/scripts/set-public-origin.mjs "$URL"
+  ) >/dev/null 2>&1 &
 else
   echo "WARNING: couldn't read a tunnel URL yet. Recent tunnel output:"
   tail -n 20 "$TUNNEL_LOG"

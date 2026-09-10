@@ -57,11 +57,19 @@ export async function loadPublicOrigin(): Promise<void> {
 }
 
 /** Best-known public origin, or null if we can't build a reachable URL yet.
- * env → in-memory (browser-reported) → app_settings (survives restarts / lets ops seed it). */
+ * env → app_settings (kept current by start.sh / the browser) → last in-memory value. Reads the
+ * DB each call (one tiny row) so a freshly-seeded tunnel URL takes effect without a restart. */
 export async function publicOrigin(): Promise<string | null> {
 	const fromEnv = normalize(env.PRINT_PUBLIC_ORIGIN || env.ORIGIN || '');
 	if (fromEnv) return fromEnv;
-	if (g.__sparkPublicOrigin) return g.__sparkPublicOrigin;
-	await loadPublicOrigin();
+	try {
+		const [row] = await db.select().from(appSettings).where(eq(appSettings.key, SETTING_KEY)).limit(1);
+		if (row?.value) {
+			g.__sparkPublicOrigin = row.value;
+			return row.value;
+		}
+	} catch {
+		/* fall back to memory */
+	}
 	return g.__sparkPublicOrigin ?? null;
 }
