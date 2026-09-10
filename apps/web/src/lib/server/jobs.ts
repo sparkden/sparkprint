@@ -212,7 +212,8 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
  * access rights to the content"), so they're excluded from auto-routing — jobs fall through to a
  * compatible FDM printer instead of failing at dispatch.
  */
-const CLOUD_PRINTABLE = new Set(['X1', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1M', 'H2D']);
+export const CLOUD_PRINTABLE_MODELS = ['X1', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1M', 'H2D'] as const;
+const CLOUD_PRINTABLE = new Set<string>(CLOUD_PRINTABLE_MODELS);
 export function isCloudPrintable(model: string | null | undefined): boolean {
 	return !!model && CLOUD_PRINTABLE.has(model);
 }

@@ -4,7 +4,7 @@ import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { models, printers, amsUnits, amsSlots } from '$lib/server/db/schema';
 import { putBuffer } from '$lib/server/storage';
-import { submitJob } from '$lib/server/jobs';
+import { submitJob, CLOUD_PRINTABLE_MODELS } from '$lib/server/jobs';
 import { getUsage } from '$lib/server/quota';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -23,7 +23,16 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.from(amsSlots)
 		.innerJoin(amsUnits, eq(amsSlots.amsUnitId, amsUnits.id))
 		.innerJoin(printers, eq(amsSlots.printerId, printers.id))
-		.where(and(eq(printers.orgId, user.orgId), eq(printers.enabled, true), eq(amsSlots.empty, false)));
+		// Only offer colors loaded on printers we can actually cloud-print to (excludes the
+		// H2C/laser combo machines), so students never pick a color that can't be printed.
+		.where(
+			and(
+				eq(printers.orgId, user.orgId),
+				eq(printers.enabled, true),
+				eq(amsSlots.empty, false),
+				inArray(printers.model, [...CLOUD_PRINTABLE_MODELS])
+			)
+		);
 
 	// Group unique color+type, tracking availability + which models can print it.
 	const map = new Map<string, { colorHex: string; colorName: string | null; filamentType: string; available: boolean; models: Set<string> }>();
@@ -46,7 +55,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const models_ = await db
 		.select({ model: printers.model })
 		.from(printers)
-		.where(and(eq(printers.orgId, user.orgId), eq(printers.enabled, true)));
+		.where(and(eq(printers.orgId, user.orgId), eq(printers.enabled, true), inArray(printers.model, [...CLOUD_PRINTABLE_MODELS])));
 	const printerModels = [...new Set(models_.map((m) => m.model))];
 
 	return {
