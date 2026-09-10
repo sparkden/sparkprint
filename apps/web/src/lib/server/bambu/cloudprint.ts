@@ -6,7 +6,7 @@
  *   1. POST /v1/iot-service/api/user/project            → project_id, profile_id, model_id, upload_url
  *   2. PUT  <upload_url>  (the 3mf)   ⚠ send NO Content-Type header (presign signed empty)
  *   3. PATCH /v1/iot-service/api/user/project/<id>       → register {md5, plate_idx, https url}
- *   4. POST /v1/user-service/my/task  (headers: X-BBL-Client-Name: BambuStudio,
+ *   4. POST /v1/user-service/my/task  (camelCase body! headers: X-BBL-Client-Name: BambuStudio,
  *                                      X-BBL-OS-Type: linux)  → cloud dispatches the print
  *
  * ⚠ VALIDATION STATUS: built to the documented protocol but not yet confirmed against real
@@ -42,7 +42,6 @@ function authHeaders(token: string, extra: Record<string, string> = {}) {
 
 export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrintResult> {
 	const api = REGIONS[input.region].api;
-	const fileName = `${input.jobName.replace(/[^a-zA-Z0-9_.-]/g, '_') || 'print'}.gcode.3mf`;
 
 	try {
 		// 1 ── Create a project (cloud file task).
@@ -79,6 +78,9 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 		if (!patchRes.ok) return { ok: false, error: `register file HTTP ${patchRes.status}` };
 
 		// 4 ── Create the task; Bambu cloud dispatches `project_file` to the printer.
+		// NB: unlike the snake_case iot-service endpoints, /v1/user-service/my/task expects
+		// camelCase keys. Required (verified against the live API): modelId, title, profileId,
+		// cover, deviceId, plateIndex. The rest drive the actual print (url/md5/bedType/AMS).
 		const taskRes = await fetch(`${api}/v1/user-service/my/task`, {
 			method: 'POST',
 			headers: authHeaders(input.accessToken, {
@@ -88,26 +90,26 @@ export async function sendCloudPrint(input: CloudPrintInput): Promise<CloudPrint
 				'X-BBL-OS-Type': 'linux'
 			}),
 			body: JSON.stringify({
-				mode: 'cloud_file',
-				dev_id: input.devId,
-				project_id: String(projectId),
-				profile_id: String(profileId),
-				model_id: String(modelId),
-				task_name: input.jobName,
-				subtask_name: input.jobName,
+				modelId: String(modelId),
+				projectId: Number(projectId) || 0,
+				profileId: Number(profileId) || 0,
+				title: input.jobName,
+				cover: '',
+				deviceId: input.devId,
+				plateIndex: input.plateIdx,
 				url: httpsUrl,
-				file: fileName,
-				plate_idx: input.plateIdx,
-				bed_type: input.bedType,
 				md5,
-				use_ams: input.amsMapping.length > 0,
-				ams_mapping: input.amsMapping,
-				ams_mapping2: input.amsMapping2,
+				bedType: input.bedType,
+				useAms: input.amsMapping.length > 0,
+				amsMapping: input.amsMapping,
+				bedLeveling: true,
+				flowCali: false,
+				vibrationCali: false,
+				layerInspect: true,
 				timelapse: false,
-				bed_leveling: true,
-				flow_cali: false,
-				vibration_cali: false,
-				layer_inspect: true
+				context: 'slicer',
+				designId: 0,
+				instanceId: 0
 			})
 		});
 		if (!taskRes.ok) return { ok: false, error: `create task HTTP ${taskRes.status}: ${(await taskRes.text()).slice(0, 200)}` };
