@@ -50,6 +50,14 @@ export const jobStatusEnum = pgEnum('job_status', [
 ]);
 
 // ── Organizations (schools) ───────────────────────────────────────────────────
+// Global key/value app settings (not org-scoped). Currently: the public base URL the Bambu
+// printer downloads sliced files from (auto-learned from the browser, or set via env).
+export const appSettings = pgTable('app_settings', {
+	key: text('key').primaryKey(),
+	value: text('value').notNull(),
+	updatedAt
+});
+
 export const orgs = pgTable('orgs', {
 	id: id('org'),
 	name: text('name').notNull(),

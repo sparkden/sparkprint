@@ -19,6 +19,7 @@ import { objectFsPath, putBuffer } from './storage';
 import { realSlice, slicerAvailable } from './slicer-cli';
 import { ensureSlicer } from './ensure-slicer';
 import { orcaAvailable } from './orca';
+import { loadPublicOrigin } from './public-origin';
 
 const g = globalThis as unknown as { __sparkWorkers?: boolean };
 
@@ -77,6 +78,7 @@ async function sliceJob(jobId: string) {
 export async function startWorkers() {
 	if (g.__sparkWorkers) return;
 	g.__sparkWorkers = true;
+	await loadPublicOrigin(); // restore the printer-reachable base URL learned in a prior run
 	const boss = await getBoss();
 
 	await boss.work(SLICE_QUEUE, { batchSize: 1 }, async (jobs: unknown) => {
