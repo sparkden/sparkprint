@@ -5,6 +5,7 @@ import { db } from '$lib/server/db';
 import { printers, amsUnits, amsSlots, bambuAccounts } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import { createCloudAccount, refreshCloudAccounts } from '$lib/server/printers';
+import { isCloudPrintable } from '$lib/server/jobs';
 import { login, sendEmailCode, loginWithCode } from '$lib/server/bambu/cloud';
 import { manager } from '$lib/server/bambu/manager';
 import { MODEL_IDS } from '$lib/bambuModels';
@@ -35,7 +36,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 				.innerJoin(amsUnits, eq(amsSlots.amsUnitId, amsUnits.id))
 				.where(eq(amsSlots.printerId, p.id))
 				.orderBy(asc(amsUnits.amsIndex), asc(amsSlots.slotIndex));
-			return { ...p, slots };
+			// printable=false ⇒ model can't be cloud-printed (e.g. H2C combo/laser): auto-excluded.
+			return { ...p, slots, printable: isCloudPrintable(p.model) };
 		})
 	);
 

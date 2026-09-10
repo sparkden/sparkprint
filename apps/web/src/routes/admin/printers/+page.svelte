@@ -56,7 +56,7 @@
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2">
 			{#each data.printers as p}
-				<div class="card p-5 {p.enabled ? '' : 'opacity-60'}">
+				<div class="card p-5 {p.enabled && p.printable ? '' : 'opacity-60'}">
 					<div class="flex items-start justify-between">
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-spark-soft text-spark-deep"><Icon name="printer" size={20} /></div>
@@ -65,7 +65,14 @@
 								<p class="text-xs text-muted-ink">{p.model}{p.location ? ` · ${p.location}` : ''}</p>
 							</div>
 						</div>
-						<span class="badge {PRINTER_STATUS_META[p.status]?.badge ?? 'badge-neutral'}">{PRINTER_STATUS_META[p.status]?.label ?? p.status}</span>
+						<div class="flex flex-col items-end gap-1">
+							<span class="badge {PRINTER_STATUS_META[p.status]?.badge ?? 'badge-neutral'}">{PRINTER_STATUS_META[p.status]?.label ?? p.status}</span>
+							{#if !p.printable}
+								<span class="badge badge-neutral" title="Bambu's cloud can't print to this model yet (combo/laser machine). It's kept out of the print queue automatically.">Cloud printing unsupported</span>
+							{:else if !p.enabled}
+								<span class="badge badge-neutral" title="Manually excluded from the print queue.">Excluded</span>
+							{/if}
+						</div>
 					</div>
 
 					<!-- AMS color chips -->
@@ -98,13 +105,17 @@
 
 					<div class="mt-3 flex items-center gap-2">
 						<a href="/admin/printers/{p.id}" class="btn btn-secondary btn-sm flex-1"><Icon name="palette" size={15} /> Map colors</a>
-						<form method="POST" action="?/toggleEnabled" use:enhance>
-							<input type="hidden" name="id" value={p.id} />
-							<input type="hidden" name="enabled" value={(!p.enabled).toString()} />
-							<button class="btn btn-ghost btn-sm" title={p.enabled ? 'Disable' : 'Enable'}>
-								{p.enabled ? 'Enabled' : 'Disabled'}
-							</button>
-						</form>
+						{#if p.printable}
+							<form method="POST" action="?/toggleEnabled" use:enhance>
+								<input type="hidden" name="id" value={p.id} />
+								<input type="hidden" name="enabled" value={(!p.enabled).toString()} />
+								<button class="btn btn-ghost btn-sm" title={p.enabled ? 'Exclude this printer from the print queue' : 'Include this printer in the print queue'}>
+									{p.enabled ? 'In queue' : 'Excluded'}
+								</button>
+							</form>
+						{:else}
+							<button class="btn btn-ghost btn-sm cursor-not-allowed opacity-60" disabled title="This model can't be cloud-printed yet, so it's excluded automatically.">Excluded</button>
+						{/if}
 						<form method="POST" action="?/remove" use:enhance>
 							<input type="hidden" name="id" value={p.id} />
 							<button class="btn btn-ghost btn-sm text-danger" title="Remove"><Icon name="trash" size={15} /></button>
