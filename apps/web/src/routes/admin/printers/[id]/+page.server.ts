@@ -133,6 +133,6 @@ export const actions: Actions = {
 		const printer = await ownedPrinter(me.orgId, params.id);
 		if (!printer) return fail(404, { error: 'Printer not found' });
 		const ok = await manager().unloadFilament(printer.id);
-		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload (printer may be offline or not in Developer Mode).' };
+		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload — the printer may be offline or blocking third-party control commands.' };
 	}
 };

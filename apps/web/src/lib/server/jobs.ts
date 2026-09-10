@@ -18,6 +18,7 @@ import { BAMBU_MODE, region as normRegion } from './bambu/config';
 import { colorDistance } from '$lib/color';
 import { decrypt } from './crypto';
 import { readBuffer, objectExists } from './storage';
+import { enqueueSlice } from './queue';
 import { sendCloudPrint } from './bambu/cloudprint';
 
 // ── Events / timeline ─────────────────────────────────────────────────────────
@@ -313,6 +314,7 @@ export async function submitJob(input: SubmitInput) {
 	}
 	// Assign the print to a printer right away and tell the student where it'll go.
 	const printerName = await assignPrinter(job.id);
+	await enqueueSlice(job.id).catch(() => {}); // real slice → cloud send, in the background
 	return { ok: true as const, jobId: job.id, status: 'queued' as const, estimate: est, printerName };
 }
 
@@ -330,6 +332,7 @@ export async function approveJob(jobId: string, orgId: string, actorId: string, 
 		.where(eq(printJobs.id, jobId));
 	await logEvent(jobId, 'approval', 'Approved', { note }, actorId);
 	const printerName = await assignPrinter(jobId);
+	await enqueueSlice(jobId).catch(() => {});
 	return { ok: true, status: 'queued' as const, printerName };
 }
 

@@ -42,6 +42,11 @@ export async function readBuffer(key: string): Promise<Buffer> {
 	return readFile(pathFor(key));
 }
 
+/** Absolute filesystem path for a stored object (e.g. to hand a model to the slicer CLI). */
+export function objectFsPath(key: string): string {
+	return pathFor(key);
+}
+
 export async function objectSize(key: string) {
 	try {
 		return (await stat(pathFor(key))).size;

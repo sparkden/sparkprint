@@ -54,15 +54,41 @@ docker run -p 3000:3000 \
 
 `.github/workflows/ci.yml` runs type-check + unit tests + build on every push/PR.
 
-## The slicer worker
+## Slicing (runs with the app)
 
-Real printing needs the server-side slicer container (`services/slicer`, OrcaSlicer CLI).
-`docker-compose.yml` includes it; it shares the DB (job queue) and the `/data` storage
-volume with the web app. On Coolify, deploy it as a second resource from
-`services/slicer/Dockerfile` with the same `DATABASE_URL` + storage volume. You must
-provision machine/process/filament **profile JSONs** into `/opt/orca/profiles` (from
-OrcaSlicer's `resources/profiles/BBL`) and may need to tune `SLICER_CMD` for your
-OrcaSlicer version. Without the slicer running, submitted jobs sit in `slicing`.
+The slice worker runs **in-process with the web server** — it starts automatically, no
+separate service to launch. It uses a CLI slicer if one is available, in this order:
+
+1. **`SLICER_CMD`** — a full command template with `{model}` / `{outdir}` placeholders.
+   This is the reliable way to load your Bambu profiles, e.g.:
+   ```
+   SLICER_CMD='/opt/orca/orca-slicer --load-settings "/profiles/x1c.json;/profiles/0.2mm.json" --load-filaments /profiles/pla.json --slice 1 --outputdir {outdir} {model}'
+   ```
+2. **`SLICER_BIN`** — a slicer binary (invoked PrusaSlicer/OrcaSlicer-style).
+3. A slicer detected on `PATH` (`orca-slicer`, `prusa-slicer`, `superslicer`,
+   `CuraEngine`, `bambu-studio`).
+
+If none is configured, it **falls back to a geometry-based size estimate** (grams/time) so
+the queue never gets stuck — jobs still assign to a printer. Real gcode requires a real
+slicer + your machine/process/filament profiles.
+
+To bundle OrcaSlicer in the deployment, either add it to the web image (see
+`services/slicer/Dockerfile` for the apt packages + AppImage extraction) and set
+`SLICER_CMD`, or run the separate `services/slicer` container from `docker-compose.yml`
+(it subscribes to the same queue — pg-boss gives each job to one worker).
+
+## Printing to the printers
+
+SparkPrint starts prints through **Bambu's official cloud print task API — the same routes
+Bambu Studio uses** (create project → upload the sliced 3mf to Bambu's storage →
+`POST /my/task` with the `X-BBL-Client-Name: BambuStudio` headers). **No "Developer Mode"
+is required for cloud printing.** Live status + AMS come over Bambu cloud MQTT.
+
+Note: direct *control* commands (pause / resume / stop / unload filament) publish to the
+printer's MQTT request topic, which Bambu restricts for third parties in Standard Mode
+(Jan-2025). Those may not work unless the printer allows it; **starting prints via the
+cloud task does not depend on it.** Request signing on the newest secured firmware may need
+iteration against your account's responses.
 
 ## Going to real Bambu hardware
 
