@@ -14,10 +14,11 @@ import { readFile } from 'node:fs/promises';
 import { getBoss, SLICE_QUEUE, DISPATCH_QUEUE, enqueueDispatch, jobsOf } from './queue';
 import { dispatch, logEvent } from './jobs';
 import { db } from './db';
-import { printJobs, models } from './db/schema';
+import { printJobs, models, printers } from './db/schema';
 import { objectFsPath, putBuffer } from './storage';
 import { realSlice, slicerAvailable } from './slicer-cli';
 import { ensureSlicer } from './ensure-slicer';
+import { orcaAvailable } from './orca';
 
 const g = globalThis as unknown as { __sparkWorkers?: boolean };
 
@@ -27,13 +28,23 @@ async function sliceJob(jobId: string) {
 	const [model] = await db.select().from(models).where(eq(models.id, job.modelId)).limit(1);
 	if (!model) return;
 
+	// Target printer model (assigned pre-slice) → OrcaSlicer machine profile.
+	let printerModel = job.printerModelTarget ?? undefined;
+	if (job.printerId) {
+		const [p] = await db.select({ model: printers.model }).from(printers).where(eq(printers.id, job.printerId)).limit(1);
+		if (p?.model) printerModel = p.model;
+	}
+	const filamentType = job.colorRequest?.[0]?.filamentType || 'PLA';
+
 	const proc = (job.process ?? {}) as Record<string, unknown>;
 	const settings = {
 		layerHeightMm: Number(proc.layerHeightMm ?? job.layerHeightMm ?? 0.2),
 		infillPct: Number(proc.infillPct ?? job.infillPct ?? 15),
 		supports: Boolean(proc.supports ?? job.supports),
 		raft: Boolean(proc.raft),
-		adhesion: typeof proc.adhesion === 'string' ? proc.adhesion : undefined
+		adhesion: typeof proc.adhesion === 'string' ? proc.adhesion : undefined,
+		printerModel,
+		filamentType
 	};
 	let result;
 	try {
@@ -43,7 +54,7 @@ async function sliceJob(jobId: string) {
 		return; // stays assigned/queued — not stuck
 	}
 	if (!result) {
-		await logEvent(jobId, 'slice', 'No slicer configured — using the size estimate. Set SLICER_CMD to enable real slicing.');
+		await logEvent(jobId, 'slice', 'No slicer available — using the size estimate.');
 		return;
 	}
 
@@ -79,6 +90,9 @@ export async function startWorkers() {
 		}
 	});
 
-	ensureSlicer().catch(() => {}); // warm up / install the bundled slicer in the background
+	// Warm up: prefer OrcaSlicer; only install the bundled Slic3r if Orca isn't present.
+	orcaAvailable().then((o) => {
+		if (!o) ensureSlicer().catch(() => {});
+	});
 	slicerAvailable().then((s) => console.log(`[queue] workers started · slicer: ${s ?? 'none (size-estimate fallback)'}`));
 }

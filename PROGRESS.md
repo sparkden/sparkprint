@@ -200,12 +200,16 @@ quotas, invites, approvals. Teachers can approve/monitor. Students import, desig
 - [x] Admin: printer management, AMS & color mapping, filament inventory
 - [x] Quotas: per-user monthly gram/job limits + live usage tracking
 - [x] Student: model import, 3D design/arrange viewer, color selection
-- [x] Slicing adapter (mock) + worker scaffold for real CLI
+- [x] Slicing adapter + worker scaffold for real CLI
 - [x] Print queue + auto-assign to next available compatible printer
 - [x] Approval mode (admin sign-off before print starts)
 - [x] Usage dashboards + cost accounting (basic)
 - [x] Electron desktop wrapper (scaffold)
-- [ ] **Real slicing**: provision BambuStudio CLI + profiles; switch web to enqueue
+- [x] **Real slicing**: in-process OrcaSlicer (Bambu profiles) → real Bambu-printable G-code.
+      Auto-detected (bundled AppRun / `$ORCA_APPRUN` + xvfb); picks the machine/process/filament
+      system profile per target printer and layers a generated override preset so the student's
+      supports/raft/infill/quality choices apply. Falls back to bundled Slic3r, then size estimate.
+      Docker image ships OrcaSlicer v2.4.2 + xvfb (amd64).
 - [x] **Bambu cloud connect + live telemetry + pause/resume/stop** (MQTT manager, `cloud` mode)
 - [ ] **Bambu cloud print dispatch**: 3mf upload + `/my/task` + request signing (`cloudprint.ts`)
 - [ ] Bambu 2FA (authenticator) login flow; token refresh/expiry UX

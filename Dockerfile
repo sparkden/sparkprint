@@ -28,6 +28,23 @@ RUN npm run build -w @sparkprint/web
 FROM base AS prod-deps
 RUN npm ci --omit=dev
 
+# ── OrcaSlicer (real Bambu-printable G-code) ─────────────────────────────────────
+# Extract the AppImage (no FUSE needed) to a fixed path the app auto-detects. Pin the
+# version; override ORCA_URL to bump it. amd64 only — on other arches this stage is a no-op
+# and the app falls back to the bundled Slic3r.
+FROM node:22-bookworm-slim AS orca
+ARG TARGETARCH=amd64
+ARG ORCA_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    mkdir -p /opt/orca; \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+      curl -fsSL "$ORCA_URL" -o /tmp/orca.AppImage; \
+      chmod +x /tmp/orca.AppImage; \
+      cd /opt/orca; /tmp/orca.AppImage --appimage-extract >/dev/null; \
+      rm -f /tmp/orca.AppImage; \
+    fi
+
 # ── Runtime ──────────────────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
@@ -37,10 +54,18 @@ ENV NODE_ENV=production \
     STORAGE_DIR=/data/storage \
     BODY_SIZE_LIMIT=104857600 \
     PROTOCOL_HEADER=x-forwarded-proto \
-    HOST_HEADER=x-forwarded-host
+    HOST_HEADER=x-forwarded-host \
+    ORCA_APPRUN=/opt/orca/squashfs-root/AppRun
 
-# tini for correct signal handling (graceful shutdown of the MQTT manager).
-RUN apt-get update && apt-get install -y --no-install-recommends tini curl && rm -rf /var/lib/apt/lists/*
+# tini for signals; xvfb + GL/GTK libs so OrcaSlicer slices headless; fonts for text on plate.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tini curl xvfb \
+      libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 \
+      libwebkit2gtk-4.0-37 libsecret-1-0 fontconfig fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+
+# OrcaSlicer (extracted AppImage). Present only on amd64; harmless if the dir is empty.
+COPY --from=orca /opt/orca /opt/orca
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/build ./apps/web/build

@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from '$env/dynamic/private';
 import { ensureSlicer } from './ensure-slicer';
+import { orcaAvailable, orcaSlice } from './orca';
 
 export type SliceSettings = {
 	layerHeightMm?: number;
@@ -25,6 +26,8 @@ export type SliceSettings = {
 	supports?: boolean;
 	raft?: boolean;
 	adhesion?: string; // 'none' | 'skirt' | 'brim' | 'raft'
+	printerModel?: string; // X1C | P1S | … — selects the OrcaSlicer machine profile
+	filamentType?: string; // 'PLA' | 'PETG' | 'ABS' — selects the filament profile
 };
 
 const CANDIDATES = ['orca-slicer', 'OrcaSlicer', 'prusa-slicer', 'prusa-slicer-console', 'superslicer', 'slic3r', 'bambu-studio', 'CuraEngine'];
@@ -61,6 +64,11 @@ async function resolveSlicer(): Promise<Resolved | null> {
 
 /** Human-readable description of the active slicer, or null. */
 export async function slicerAvailable(): Promise<string | null> {
+	// SLICER_CMD is an explicit user override and wins over auto-detection.
+	if (!env.SLICER_CMD) {
+		const orca = await orcaAvailable();
+		if (orca) return orca;
+	}
 	const r = await resolveSlicer();
 	if (!r) return null;
 	return r.kind === 'cmd' ? 'SLICER_CMD' : `${r.kind} (${r.bin})`;
@@ -116,6 +124,12 @@ function parseMetrics(text: string): { grams: number; timeSec: number } {
 export type SliceOutput = { gcodePath: string; grams: number; timeSec: number };
 
 export async function realSlice(modelPath: string, settings: SliceSettings = {}): Promise<SliceOutput | null> {
+	// Prefer OrcaSlicer (real Bambu-printable G-code) when available, unless the operator set an
+	// explicit SLICER_CMD override. Falls through to Slic3r/Prusa/Cura otherwise.
+	if (!env.SLICER_CMD && (await orcaAvailable())) {
+		const o = await orcaSlice(modelPath, settings);
+		if (o) return o;
+	}
 	const r = await resolveSlicer();
 	if (!r) return null;
 	const outDir = await mkdtemp(join(tmpdir(), 'spark-slice-'));
