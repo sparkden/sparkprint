@@ -63,13 +63,39 @@ function fromLoginJson(json: any): LoginResult {
 	return { status: 'error', message: json?.error ?? 'Unexpected login response' };
 }
 
+/**
+ * Resolve the MQTT username `u_<uid>`. The access token may be an opaque token (not a JWT),
+ * so the JWT `username` claim can be missing — fall back to the profile endpoint.
+ */
+async function resolveUid(token: string, reg: Region, fromToken: string): Promise<string> {
+	if (fromToken && fromToken.startsWith('u_') && fromToken.length > 2) return fromToken;
+	try {
+		const res = await fetch(api(reg) + '/v1/design-user-service/my/preference', {
+			headers: { authorization: `Bearer ${token}`, 'user-agent': UA }
+		});
+		if (res.ok) {
+			const j: any = await res.json();
+			if (j?.uid) return `u_${j.uid}`;
+		}
+	} catch {
+		/* ignore */
+	}
+	return fromToken; // best effort
+}
+
+/** Finalize an 'ok' result by ensuring a usable uid (for opaque tokens). */
+async function finalize(result: LoginResult, reg: Region): Promise<LoginResult> {
+	if (result.status === 'ok') result.uid = await resolveUid(result.accessToken, reg, result.uid);
+	return result;
+}
+
 /** Step 1: attempt password login. */
 export async function login(email: string, password: string, r: string): Promise<LoginResult> {
 	const reg = normRegion(r);
 	const res = await post(reg, '/v1/user-service/user/login', { account: email, password, apiError: '' });
 	if (res.status === 429) return { status: 'error', message: 'Bambu rate-limited the login. Wait a minute and retry.' };
 	if (!res.ok && res.status !== 200) return { status: 'error', message: `Login failed (HTTP ${res.status})` };
-	return fromLoginJson(await res.json().catch(() => ({})));
+	return finalize(fromLoginJson(await res.json().catch(() => ({}))), reg);
 }
 
 /** Request an email verification code be sent (codeLogin). */
@@ -87,7 +113,7 @@ export async function loginWithCode(email: string, code: string, r: string): Pro
 		return { status: 'error', message: j?.code === 1 ? 'That code expired — request a new one.' : 'Incorrect code.' };
 	}
 	if (!res.ok) return { status: 'error', message: `Verification failed (HTTP ${res.status})` };
-	return fromLoginJson(await res.json().catch(() => ({})));
+	return finalize(fromLoginJson(await res.json().catch(() => ({}))), reg);
 }
 
 const MODEL_MAP: Record<string, BambuDeviceModel> = {

@@ -62,7 +62,13 @@ export const actions: Actions = {
 		const r = await login(email, password, region);
 		if (r.status === 'ok') {
 			const { imported } = await createCloudAccount(me.orgId, { email, region, uid: r.uid, accessToken: r.accessToken, refreshToken: r.refreshToken, expiresAt: r.expiresAt });
-			return { success: true, message: `Connected — imported ${imported} printer${imported === 1 ? '' : 's'}.` };
+			return {
+				success: true,
+				message:
+					imported === 0
+						? 'Connected — but Bambu reports no printers on this account yet. In the Bambu Handy app or Bambu Studio (signed in as this same account), make sure your printers are added to it, then click Refresh.'
+						: `Connected — imported ${imported} printer${imported === 1 ? '' : 's'}.`
+			};
 		}
 		if (r.status === 'needCode') {
 			await sendEmailCode(email, region);
