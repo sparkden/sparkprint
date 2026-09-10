@@ -98,9 +98,9 @@
 					<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} {plate} onstats={(s) => (stats = s)} />
 					{#if !hasModel}
 						<button type="button" onclick={() => fileInput?.click()}
-							class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed {dragOver ? 'border-spark bg-spark/10' : 'border-warm-700'} transition-colors">
+							class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed {dragOver ? 'border-spark bg-spark-soft/50' : 'border-warm-300'} transition-colors">
 							<div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-spark-soft text-spark-deep"><Icon name="upload" size={26} /></div>
-							<div class="text-center"><p class="font-semibold text-warm-100">Drop a model or click to browse</p><p class="text-sm text-warm-300">STL, OBJ, or 3MF · add as many as you like</p></div>
+							<div class="text-center"><p class="font-semibold text-ink">Drop a model or click to browse</p><p class="text-sm text-muted-ink">STL, OBJ, or 3MF · add as many as you like</p></div>
 						</button>
 					{/if}
 				</div>

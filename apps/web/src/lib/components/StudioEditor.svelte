@@ -213,16 +213,45 @@
 		if (plateGroup) scene.remove(plateGroup);
 		plateGroup = new THREE.Group();
 		const mx = Math.max(plate.x, plate.y);
-		const grid = new THREE.GridHelper(mx, Math.round(mx / 20), 0x8a7e72, 0x4a423a);
-		(grid.material as any).opacity = 0.55; (grid.material as any).transparent = true;
+		const grid = new THREE.GridHelper(mx, Math.round(mx / 20), 0xb6aba0, 0xd6ccbc);
+		(grid.material as any).opacity = 0.8; (grid.material as any).transparent = true;
 		plateGroup.add(grid);
-		const plane = new THREE.Mesh(new THREE.PlaneGeometry(plate.x, plate.y), new THREE.MeshStandardMaterial({ color: 0x35302a, roughness: 0.95 }));
+		const plane = new THREE.Mesh(new THREE.PlaneGeometry(plate.x, plate.y), new THREE.MeshStandardMaterial({ color: 0xece3d5, roughness: 0.95 }));
 		plane.rotation.x = -Math.PI / 2; plane.position.y = -0.12; plane.receiveShadow = true; plateGroup.add(plane);
 		plateGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(plate.x, 0.2, plate.y)), new THREE.LineBasicMaterial({ color: 0xff5b14 })));
+
+		// Ruler: labeled ticks every 50 mm along the front (X) and left (Y) edges.
+		const label = (text: string) => {
+			const c = document.createElement('canvas');
+			c.width = 96; c.height = 48;
+			const ctx = c.getContext('2d')!;
+			ctx.fillStyle = '#5d534a'; ctx.font = 'bold 30px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+			ctx.fillText(text, 48, 24);
+			const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false, depthWrite: false }));
+			spr.scale.set(24, 12, 1);
+			return spr;
+		};
+		for (let d = 0; d <= plate.x; d += 50) {
+			const s = label(String(d)); s.position.set(-plate.x / 2 + d, 1, plate.y / 2 + 13); plateGroup.add(s);
+		}
+		for (let d = 0; d <= plate.y; d += 50) {
+			if (d === 0) continue; // 0 already shown on the X edge corner
+			const s = label(String(d)); s.position.set(-plate.x / 2 - 14, 1, -plate.y / 2 + d); plateGroup.add(s);
+		}
+		const unit = label('mm'); unit.position.set(-plate.x / 2 - 14, 1, plate.y / 2 + 13); plateGroup.add(unit);
+
 		scene.add(plateGroup);
 	}
 
-	$effect(() => { if (gizmo && gizmo.setMode) { gizmo.setMode(mode); gizmo.showX = true; gizmo.showZ = true; gizmo.showY = mode !== 'translate'; } });
+	function applyMode(m: 'translate' | 'rotate' | 'scale') {
+		mode = m;
+		if (gizmo && gizmo.setMode) {
+			gizmo.setMode(m);
+			gizmo.showX = true;
+			gizmo.showZ = true;
+			gizmo.showY = m !== 'translate';
+		}
+	}
 	$effect(() => { for (const o of objects) { const m = meshes.get(o.id); if (m) m.material.color = new THREE.Color(colorHex); } void colorHex; });
 	$effect(() => { plate.x; plate.y; if (THREE && scene) buildPlate(); });
 
@@ -238,9 +267,9 @@
 		const t = e.target as HTMLElement;
 		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 		const k = e.key.toLowerCase();
-		if (k === 'm') { mode = 'translate'; }
-		else if (k === 'r') { mode = 'rotate'; }
-		else if (k === 's') { mode = 'scale'; }
+		if (k === 'm') { applyMode('translate'); }
+		else if (k === 'r') { applyMode('rotate'); }
+		else if (k === 's') { applyMode('scale'); }
 		else if (k === 'a') { autoArrange(); }
 		else if (k === 'l') { layFlatSelected(); }
 		else if (k === 'escape') { select(null); }
@@ -258,7 +287,7 @@
 			const { TransformControls } = await import('three/addons/controls/TransformControls.js');
 
 			scene = new THREE.Scene();
-			scene.background = new THREE.Color('#2b2723'); // warm dark slicer viewport
+			scene.background = new THREE.Color('#FBF5EC'); // light warm-paper viewport
 			camera = new THREE.PerspectiveCamera(45, 1, 0.1, 9000);
 			camera.position.set(240, 200, 240);
 			renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -270,8 +299,8 @@
 			orbit.enableDamping = true; orbit.dampingFactor = 0.08; orbit.maxPolarAngle = Math.PI / 2.02;
 			raycaster = new THREE.Raycaster();
 
-			scene.add(new THREE.HemisphereLight(0xffffff, 0x3a332c, 1.05));
-			const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(120, 240, 150); key.castShadow = true;
+			scene.add(new THREE.HemisphereLight(0xffffff, 0xd6ccbc, 1.15));
+			const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(120, 240, 150); key.castShadow = true;
 			key.shadow.mapSize.set(2048, 2048); key.shadow.camera.near = 1; key.shadow.camera.far = 1600; scene.add(key);
 			buildPlate();
 
@@ -304,55 +333,55 @@
 	] as const;
 </script>
 
-<div class="relative h-full w-full overflow-hidden rounded-xl border border-warm-800 bg-[#2b2723]" bind:this={container}>
-	<div class="pointer-events-none absolute left-3 top-3 rounded-md bg-black/30 px-2 py-1 text-[11px] font-medium text-warm-100 backdrop-blur">
+<div class="relative h-full w-full overflow-hidden rounded-xl border border-warm-200 bg-soft-paper" bind:this={container}>
+	<div class="pointer-events-none absolute left-3 top-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[11px] font-medium text-soft-ink backdrop-blur">
 		{plate.x} × {plate.y} × {plate.z} mm{#if objects.length} · {objects.length} object{objects.length === 1 ? '' : 's'}{/if}
 	</div>
-	{#if loading}<div class="absolute inset-0 flex items-center justify-center bg-black/30 text-sm text-warm-100">Loading…</div>{/if}
-	{#if errorMsg}<div role="button" tabindex="0" onclick={() => (errorMsg = null)} onkeydown={() => (errorMsg = null)} class="absolute inset-x-3 bottom-3 z-10 rounded-lg border border-danger/40 bg-danger/20 px-3 py-2 text-sm text-white">{errorMsg}</div>{/if}
-	{#if objects.length === 0 && !loading}<div class="absolute inset-0 flex items-center justify-center text-sm text-warm-300">Add a model to start</div>{/if}
+	{#if loading}<div class="absolute inset-0 flex items-center justify-center bg-surface/60 text-sm text-soft-ink">Loading…</div>{/if}
+	{#if errorMsg}<div role="button" tabindex="0" onclick={() => (errorMsg = null)} onkeydown={() => (errorMsg = null)} class="absolute inset-x-3 bottom-3 z-10 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{errorMsg}</div>{/if}
+	{#if objects.length === 0 && !loading}<div class="absolute inset-0 flex items-center justify-center text-sm text-muted-ink">Add a model to start</div>{/if}
 
 	{#if objects.length}
 		<!-- Tool rail -->
-		<div class="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-warm-800 bg-[#38322c]/95 p-1.5 shadow-lg backdrop-blur">
+		<div class="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-warm-200 bg-surface/95 p-1.5 shadow-lg backdrop-blur">
 			{#each tools as t}
-				<button type="button" title="{t.label} ({t.key})" onclick={() => (mode = t.id)} class="flex h-9 w-9 items-center justify-center rounded-lg transition-colors {mode === t.id ? 'bg-spark text-white' : 'text-warm-100 hover:bg-white/10'}"><Icon name={t.icon} size={18} /></button>
+				<button type="button" title="{t.label} ({t.key})" onclick={() => applyMode(t.id)} class="flex h-9 w-9 items-center justify-center rounded-lg transition-colors {mode === t.id ? 'bg-spark text-white' : 'text-soft-ink hover:bg-warm-100'}"><Icon name={t.icon} size={18} /></button>
 			{/each}
-			<span class="my-0.5 h-px w-full bg-white/10"></span>
-			<button type="button" title="Lay flat (L)" onclick={layFlatSelected} class="flex h-9 w-9 items-center justify-center rounded-lg text-warm-100 hover:bg-white/10"><Icon name="layers" size={18} /></button>
-			<button type="button" title="Auto-arrange (A)" onclick={autoArrange} class="flex h-9 w-9 items-center justify-center rounded-lg text-warm-100 hover:bg-white/10"><Icon name="dashboard" size={18} /></button>
+			<span class="my-0.5 h-px w-full bg-warm-200"></span>
+			<button type="button" title="Lay flat (L)" onclick={layFlatSelected} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="layers" size={18} /></button>
+			<button type="button" title="Auto-arrange (A)" onclick={autoArrange} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="dashboard" size={18} /></button>
 		</div>
 
 		<!-- Object list -->
-		<div class="absolute right-3 top-3 max-h-[45%] w-52 overflow-y-auto rounded-xl border border-warm-800 bg-[#38322c]/95 p-2 text-warm-100 shadow-lg backdrop-blur">
-			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-warm-300">Objects</p>
+		<div class="absolute right-3 top-3 max-h-[45%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
+			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Objects</p>
 			{#each objects as o}
-				<div class="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs {o.id === selectedId ? 'bg-white/10' : ''}">
-					<button type="button" class="flex-1 truncate text-left hover:text-white" onclick={() => select(o.id)}>{o.name}</button>
-					<button type="button" title="Duplicate (Ctrl+D)" class="text-warm-300 hover:text-white" onclick={() => { select(o.id); duplicateSelected(); }}><Icon name="plus" size={13} /></button>
-					<button type="button" title="Delete (Del)" class="text-warm-300 hover:text-danger" onclick={() => removeObject(o.id)}><Icon name="trash" size={13} /></button>
+				<div class="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs {o.id === selectedId ? 'bg-spark-soft text-spark-deep' : ''}">
+					<button type="button" class="flex-1 truncate text-left hover:text-spark" onclick={() => select(o.id)}>{o.name}</button>
+					<button type="button" title="Duplicate (Ctrl+D)" class="text-muted-ink hover:text-ink" onclick={() => { select(o.id); duplicateSelected(); }}><Icon name="plus" size={13} /></button>
+					<button type="button" title="Delete (Del)" class="text-muted-ink hover:text-danger" onclick={() => removeObject(o.id)}><Icon name="trash" size={13} /></button>
 				</div>
 			{/each}
 		</div>
 
 		<!-- Selected object info + mirror -->
 		{#if selected && selInfo}
-			<div class="absolute bottom-3 left-16 rounded-xl border border-warm-800 bg-[#38322c]/95 px-3 py-2 text-warm-100 shadow-lg backdrop-blur">
+			<div class="absolute bottom-3 left-16 rounded-xl border border-warm-200 bg-surface/95 px-3 py-2 text-ink shadow-lg backdrop-blur">
 				<div class="flex items-center gap-3 text-xs">
 					<span class="font-semibold">{selected.name}</span>
-					<span class="text-warm-300">{selInfo.w} × {selInfo.d} × {selInfo.h} mm</span>
-					<span class="text-warm-300">{selInfo.scalePct}%</span>
-					<span class="h-3 w-px bg-white/15"></span>
-					<span class="text-warm-300">Mirror</span>
+					<span class="text-muted-ink">{selInfo.w} × {selInfo.d} × {selInfo.h} mm</span>
+					<span class="text-muted-ink">{selInfo.scalePct}%</span>
+					<span class="h-3 w-px bg-warm-200"></span>
+					<span class="text-muted-ink">Mirror</span>
 					{#each ['x', 'y', 'z'] as ax}
-						<button type="button" class="rounded bg-white/10 px-1.5 py-0.5 hover:bg-white/20" onclick={() => mirrorSelected(ax as 'x')}>{ax.toUpperCase()}</button>
+						<button type="button" class="rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" onclick={() => mirrorSelected(ax as 'x')}>{ax.toUpperCase()}</button>
 					{/each}
 				</div>
 			</div>
 		{/if}
 
 		<!-- Shortcut hint -->
-		<div class="pointer-events-none absolute bottom-3 right-3 rounded-md bg-black/25 px-2 py-1 text-[10px] text-warm-300 backdrop-blur">
+		<div class="pointer-events-none absolute bottom-3 right-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[10px] text-muted-ink backdrop-blur">
 			M move · R rotate · S scale · A arrange · L flat · Del delete
 		</div>
 	{/if}

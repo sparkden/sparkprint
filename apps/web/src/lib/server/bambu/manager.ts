@@ -132,6 +132,10 @@ class BambuManager {
 	requestStatus(printerId: string) {
 		return this.command(printerId, { pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }, 0);
 	}
+	/** Unload the currently-loaded filament back into the AMS (target 255 = unload). */
+	unloadFilament(printerId: string) {
+		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'ams_change_filament', target: 255, curr_temp: 220, tar_temp: 220 } }, 1);
+	}
 	pause(printerId: string) {
 		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'pause' } }, 1);
 	}

@@ -157,9 +157,14 @@
 				</div>
 			{/if}
 
-			<div class="flex justify-end gap-2 pt-2">
-				<button type="button" class="btn btn-secondary" onclick={() => (open = false)}>Cancel</button>
-				<button class="btn btn-primary">Save slot</button>
+			<div class="flex items-center justify-between pt-2">
+				{#if !empty}
+					<button type="submit" formaction="?/unloadFilament" class="btn btn-ghost btn-sm text-danger" title="Unload this filament from the AMS">Unload filament</button>
+				{:else}<span></span>{/if}
+				<div class="flex gap-2">
+					<button type="button" class="btn btn-secondary" onclick={() => (open = false)}>Cancel</button>
+					<button class="btn btn-primary">Save slot</button>
+				</div>
 			</div>
 		</form>
 	</Modal>

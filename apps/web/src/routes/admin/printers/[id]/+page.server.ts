@@ -125,5 +125,14 @@ export const actions: Actions = {
 		await refreshCloudAccounts(me.orgId).catch(() => {});
 		const ok = await manager().requestStatus(printer.id);
 		return { success: true, message: ok ? 'Reloading from the printer…' : 'Requested a refresh (printer may be offline).' };
+	},
+
+	// Unload the currently-loaded filament back into the AMS.
+	unloadFilament: async ({ params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const ok = await manager().unloadFilament(printer.id);
+		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload (printer may be offline or not in Developer Mode).' };
 	}
 };
