@@ -171,7 +171,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 		// The printer downloads the sliced 3mf from a public URL we host; build it now. Without a
 		// known public origin the printer couldn't fetch the file, so hold the job rather than
 		// dispatch a link that will fail verification.
-		const origin = publicOrigin();
+		const origin = await publicOrigin();
 		if (!origin) {
 			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: 'no public URL yet', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
 			await logEvent(jobId, 'error', 'Cannot reach the printer yet — open SparkPrint in a browser (or set PRINT_PUBLIC_ORIGIN) so the printer can download the file.');

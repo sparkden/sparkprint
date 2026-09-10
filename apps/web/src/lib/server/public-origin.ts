@@ -56,8 +56,12 @@ export async function loadPublicOrigin(): Promise<void> {
 	}
 }
 
-/** Best-known public origin, or null if we can't build a reachable URL yet. */
-export function publicOrigin(): string | null {
+/** Best-known public origin, or null if we can't build a reachable URL yet.
+ * env → in-memory (browser-reported) → app_settings (survives restarts / lets ops seed it). */
+export async function publicOrigin(): Promise<string | null> {
 	const fromEnv = normalize(env.PRINT_PUBLIC_ORIGIN || env.ORIGIN || '');
-	return fromEnv ?? g.__sparkPublicOrigin ?? null;
+	if (fromEnv) return fromEnv;
+	if (g.__sparkPublicOrigin) return g.__sparkPublicOrigin;
+	await loadPublicOrigin();
+	return g.__sparkPublicOrigin ?? null;
 }
