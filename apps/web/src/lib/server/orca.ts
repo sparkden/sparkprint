@@ -207,6 +207,10 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 
 	const machinePath = join(loc.profiles, 'machine', `${machineName}.json`);
 	const filamentPath = join(loc.profiles, 'filament', `${filament}.json`);
+	// --export-3mf produces a proper Bambu printable 3mf (Metadata/plate_1.gcode + md5 + plate
+	// config) — that's what Bambu's cloud accepts. Its path is resolved relative to --outputdir,
+	// so pass a bare filename. --slice 0 also drops plate_1.gcode, which we parse for metrics.
+	const threeMfName = 'sparkprint.gcode.3mf';
 	const args = [
 		'-a',
 		loc.apprun,
@@ -216,16 +220,13 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		filamentPath,
 		'--slice',
 		'0',
+		'--export-3mf',
+		threeMfName,
 		'--outputdir',
 		outDir,
 		modelPath
 	];
 	const { code, out } = await run('xvfb-run', args);
-
-	const files = await readdir(outDir).catch(() => []);
-	const gcodeFile = files.find((f) => /^plate_\d+\.gcode$/.test(f)) || files.find((f) => f.endsWith('.gcode'));
-	if (!gcodeFile) throw new Error(`OrcaSlicer produced no gcode (exit ${code}): ${out.slice(-500)}`);
-	const gcodePath = join(outDir, gcodeFile);
 
 	const resultJson = await readFile(join(outDir, 'result.json'), 'utf8').catch(() => '');
 	if (resultJson) {
@@ -235,7 +236,14 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 			throw new Error(`OrcaSlicer failed: ${err}`);
 		}
 	}
-	const gtext = await readFile(gcodePath, 'utf8').then((t) => t.slice(-6000)).catch(() => '');
+
+	const files = await readdir(outDir).catch(() => [] as string[]);
+	const threeMf = files.includes(threeMfName) ? join(outDir, threeMfName) : null;
+	const plateGcode = files.find((f) => /^plate_\d+\.gcode$/.test(f)) || files.find((f) => f.endsWith('.gcode'));
+	if (!threeMf) throw new Error(`OrcaSlicer produced no 3mf (exit ${code}): ${out.slice(-500)}`);
+
+	// Metrics come from the plain plate gcode; the uploaded artifact is the printable 3mf.
+	const gtext = plateGcode ? await readFile(join(outDir, plateGcode), 'utf8').then((t) => t.slice(-6000)).catch(() => '') : '';
 	const m = parseMetrics(gtext, resultJson);
-	return { gcodePath, grams: m.grams, timeSec: m.timeSec };
+	return { gcodePath: threeMf, grams: m.grams, timeSec: m.timeSec };
 }
