@@ -159,6 +159,7 @@ export const printers = pgTable(
 		status: printerStatusEnum('status').notNull().default('offline'),
 		online: boolean('online').notNull().default(false),
 		enabled: boolean('enabled').notNull().default(true), // admin can take a printer out of the pool
+		priority: integer('priority').notNull().default(0), // higher = picked first when dispatching
 		nozzleDiameter: numeric('nozzle_diameter', { precision: 3, scale: 2 }).notNull().default('0.40'),
 		hasAms: boolean('has_ams').notNull().default(false),
 		// live telemetry snapshot

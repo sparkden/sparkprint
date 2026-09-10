@@ -3,7 +3,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
-	let { data } = $props();
+	let { data, form } = $props();
 
 	type Slot = (typeof data.units)[number]['slots'][number];
 	let editing = $state<null | (Slot & { amsIndex: number })>(null);
@@ -41,20 +41,41 @@
 	<a href="/admin/printers" class="mb-4 inline-flex items-center gap-1 text-sm text-muted-ink hover:text-ink">
 		<Icon name="chevronRight" size={14} class="rotate-180" /> Printers
 	</a>
-	<PageHeader title="{data.printer.name}" subtitle="Map each AMS slot to the filament and color that's loaded." />
+	<PageHeader title="{data.printer.name}" subtitle="Map each AMS slot to the filament and color that's loaded.">
+		{#snippet actions()}
+			<form method="POST" action="?/reloadAms" use:enhance style="display:inline">
+				<button class="btn btn-ghost btn-sm" title="Pull live AMS from the printer"><Icon name="refresh" size={15} /> Reload</button>
+			</form>
+			<form method="POST" action="?/addAms" use:enhance style="display:inline">
+				<button class="btn btn-secondary btn-sm"><Icon name="plus" size={15} /> Add AMS</button>
+			</form>
+		{/snippet}
+	</PageHeader>
+
+	{#if form?.message}<div class="mb-4 rounded-lg border border-success/30 bg-success/5 px-3.5 py-2.5 text-sm text-success">{form.message}</div>{/if}
+	{#if form?.error}<div class="mb-4 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-sm text-danger">{form.error}</div>{/if}
 
 	{#if data.units.length === 0}
-		<div class="card p-10 text-center text-sm text-soft-ink">This printer has no AMS units attached.</div>
+		<div class="card flex flex-col items-center gap-3 p-10 text-center">
+			<p class="text-sm text-soft-ink">No AMS units yet. They import automatically from the printer, or add one to set colors manually.</p>
+			<form method="POST" action="?/addAms" use:enhance><button class="btn btn-primary btn-sm"><Icon name="plus" size={15} /> Add AMS unit</button></form>
+		</div>
 	{:else}
 		<div class="space-y-6">
 			{#each data.units as unit}
 				<div class="card p-6">
 					<div class="mb-4 flex items-center justify-between">
 						<h2 class="text-lg font-semibold">AMS {unit.amsIndex + 1}</h2>
-						<span class="text-xs text-muted-ink">
-							{#if unit.humidity != null}Humidity {unit.humidity}%{/if}
-							{#if unit.temperature != null} · {unit.temperature}°C{/if}
-						</span>
+						<div class="flex items-center gap-3">
+							<span class="text-xs text-muted-ink">
+								{#if unit.humidity != null}Humidity {unit.humidity}%{/if}
+								{#if unit.temperature != null} · {unit.temperature}°C{/if}
+							</span>
+							<form method="POST" action="?/removeAms" use:enhance>
+								<input type="hidden" name="unitId" value={unit.id} />
+								<button class="btn btn-ghost btn-sm text-danger" title="Remove this AMS"><Icon name="trash" size={14} /></button>
+							</form>
+						</div>
 					</div>
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 						{#each unit.slots as slot}

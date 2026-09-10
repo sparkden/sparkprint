@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './db';
 import {
 	printJobs,
@@ -19,7 +19,6 @@ import { colorDistance } from '$lib/color';
 import { decrypt } from './crypto';
 import { readBuffer, objectExists } from './storage';
 import { sendCloudPrint } from './bambu/cloudprint';
-import { enqueueSlice } from './queue';
 
 // ── Events / timeline ─────────────────────────────────────────────────────────
 export async function logEvent(
@@ -102,7 +101,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				inArray(printers.status, ['idle', 'finished'])
 			)
 		)
-		.orderBy(asc(printers.name));
+		.orderBy(desc(printers.priority), asc(printers.name));
 
 	for (const p of candidates) {
 		if (job.printerModelTarget && p.model !== job.printerModelTarget) continue;
@@ -202,6 +201,50 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 	return 'queued';
 }
 
+// ── Assign a printer (color + priority) without slicing — the student-facing step ──
+// Picks the highest-priority enabled printer that has the requested color(s) loaded and
+// records the assignment. Returns the printer name so the UI can say "on Printer 4".
+export async function assignPrinter(jobId: string): Promise<string | null> {
+	const [job] = await db.select().from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
+	if (!job) return null;
+	const requests = job.colorRequest as ColorRequest[];
+
+	const candidates = await db
+		.select()
+		.from(printers)
+		.where(and(eq(printers.orgId, job.orgId), eq(printers.enabled, true)))
+		.orderBy(desc(printers.priority), asc(printers.name));
+
+	for (const p of candidates) {
+		if (job.printerModelTarget && p.model !== job.printerModelTarget) continue;
+		const slots = await db
+			.select({
+				id: amsSlots.id, amsIndex: amsUnits.amsIndex, slotIndex: amsSlots.slotIndex,
+				filamentType: amsSlots.filamentType, colorHex: amsSlots.colorHex, empty: amsSlots.empty, remainingPct: amsSlots.remainingPct
+			})
+			.from(amsSlots)
+			.innerJoin(amsUnits, eq(amsSlots.amsUnitId, amsUnits.id))
+			.where(eq(amsSlots.printerId, p.id));
+
+		const mapping: ColorMapping[] = [];
+		let ok = true;
+		for (let i = 0; i < requests.length; i++) {
+			const slot = matchSlot(requests[i], slots as LoadedSlot[]);
+			if (!slot) { ok = false; break; }
+			mapping.push({ filamentIndex: i, amsSlotId: slot.id, amsIndex: slot.amsIndex, slotIndex: slot.slotIndex, colorHex: slot.colorHex! });
+		}
+		if (!ok) continue;
+
+		await db.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'queued', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+		await logEvent(jobId, 'assign', `Assigned to ${p.name}`, { printerId: p.id, mapping });
+		return p.name;
+	}
+
+	await db.update(printJobs).set({ status: 'queued', printerId: null, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+	await logEvent(jobId, 'queue', 'Waiting for a printer with the right color');
+	return null;
+}
+
 // ── Submit a new job ──────────────────────────────────────────────────────────
 export type SubmitInput = {
 	orgId: string;
@@ -254,7 +297,7 @@ export async function submitJob(input: SubmitInput) {
 	await db
 		.update(printJobs)
 		.set({
-			status: needsApproval ? 'pending_approval' : 'slicing',
+			status: needsApproval ? 'pending_approval' : 'queued',
 			estimatedGrams: est.grams.toFixed(2),
 			estimatedTimeSec: est.timeSec,
 			estimatedCost: cost.toFixed(2),
@@ -266,14 +309,11 @@ export async function submitJob(input: SubmitInput) {
 	await logEvent(job.id, 'submit', needsApproval ? 'Submitted for approval' : 'Submitted', {}, input.userId);
 
 	if (needsApproval) {
-		return { ok: true as const, jobId: job.id, status: 'pending_approval' as const, estimate: est };
+		return { ok: true as const, jobId: job.id, status: 'pending_approval' as const, estimate: est, printerName: null };
 	}
-	if (BAMBU_MODE === 'mock') {
-		const status = await dispatch(job.id); // dev: no slicer worker, simulate immediately
-		return { ok: true as const, jobId: job.id, status, estimate: est };
-	}
-	await enqueueSlice(job.id); // cloud: slicer worker → real grams/time/3mf → dispatch
-	return { ok: true as const, jobId: job.id, status: 'slicing' as const, estimate: est };
+	// Assign the print to a printer right away and tell the student where it'll go.
+	const printerName = await assignPrinter(job.id);
+	return { ok: true as const, jobId: job.id, status: 'queued' as const, estimate: est, printerName };
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
@@ -286,15 +326,11 @@ export async function approveJob(jobId: string, orgId: string, actorId: string, 
 	if (!job || job.status !== 'pending_approval') return { ok: false, error: 'Job is not pending approval' };
 	await db
 		.update(printJobs)
-		.set({ status: 'slicing', approvedBy: actorId, approvalNote: note ?? null, updatedAt: new Date() })
+		.set({ approvedBy: actorId, approvalNote: note ?? null, updatedAt: new Date() })
 		.where(eq(printJobs.id, jobId));
 	await logEvent(jobId, 'approval', 'Approved', { note }, actorId);
-	if (BAMBU_MODE === 'mock') {
-		const status = await dispatch(jobId);
-		return { ok: true, status };
-	}
-	await enqueueSlice(jobId); // slice → dispatch
-	return { ok: true, status: 'slicing' as const };
+	const printerName = await assignPrinter(jobId);
+	return { ok: true, status: 'queued' as const, printerName };
 }
 
 export async function rejectJob(jobId: string, orgId: string, actorId: string, note?: string) {

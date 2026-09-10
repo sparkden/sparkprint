@@ -15,6 +15,13 @@
       "when": 1789011805310,
       "tag": "0001_omniscient_blackheart",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789054577422,
+      "tag": "0002_clear_matthew_murdock",
+      "breakpoints": true
     }
   ]
 }

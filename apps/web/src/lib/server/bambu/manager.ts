@@ -128,6 +128,10 @@ class BambuManager {
 		return true;
 	}
 
+	/** Ask a printer to push its full status (incl. AMS) — used by the "Reload AMS" button. */
+	requestStatus(printerId: string) {
+		return this.command(printerId, { pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }, 0);
+	}
 	pause(printerId: string) {
 		return this.command(printerId, { print: { sequence_id: this.nextSeq(), command: 'pause' } }, 1);
 	}

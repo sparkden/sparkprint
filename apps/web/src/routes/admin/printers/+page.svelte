@@ -88,7 +88,15 @@
 						<p class="mt-4 text-xs text-muted-ink">No AMS attached.</p>
 					{/if}
 
-					<div class="mt-4 flex items-center gap-2 border-t border-warm-200 pt-3">
+					<div class="mt-3 flex items-center justify-between border-t border-warm-200 pt-3 text-xs">
+						<span class="text-muted-ink">Priority <span class="font-semibold text-ink">{p.priority}</span> <span class="text-faint-ink">(higher = used first)</span></span>
+						<div class="flex gap-1">
+							<form method="POST" action="?/setPriority" use:enhance><input type="hidden" name="id" value={p.id} /><input type="hidden" name="priority" value={p.priority + 1} /><button class="rounded border border-warm-300 px-2 py-0.5 hover:bg-warm-100" title="Raise priority">▲</button></form>
+							<form method="POST" action="?/setPriority" use:enhance><input type="hidden" name="id" value={p.id} /><input type="hidden" name="priority" value={Math.max(0, p.priority - 1)} /><button class="rounded border border-warm-300 px-2 py-0.5 hover:bg-warm-100" title="Lower priority">▼</button></form>
+						</div>
+					</div>
+
+					<div class="mt-3 flex items-center gap-2">
 						<a href="/admin/printers/{p.id}" class="btn btn-secondary btn-sm flex-1"><Icon name="palette" size={15} /> Map colors</a>
 						<form method="POST" action="?/toggleEnabled" use:enhance>
 							<input type="hidden" name="id" value={p.id} />

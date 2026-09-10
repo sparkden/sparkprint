@@ -166,6 +166,15 @@ export const actions: Actions = {
 		return { success: true, message: 'Printer added.' };
 	},
 
+	setPriority: async ({ request, locals }) => {
+		const me = requireAdmin(locals.user);
+		const fd = await request.formData();
+		const id = String(fd.get('id'));
+		const priority = Math.max(0, Math.min(999, Math.round(Number(fd.get('priority')) || 0)));
+		await db.update(printers).set({ priority, updatedAt: new Date() }).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId)));
+		return { success: true };
+	},
+
 	toggleEnabled: async ({ request, locals }) => {
 		const me = requireAdmin(locals.user);
 		const fd = await request.formData();

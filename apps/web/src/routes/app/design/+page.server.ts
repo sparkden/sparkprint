@@ -173,6 +173,6 @@ export const actions: Actions = {
 		});
 
 		if (!result.ok) return fail(400, { error: result.error });
-		return { success: true, jobId: result.jobId, status: result.status };
+		return { success: true, jobId: result.jobId, status: result.status, printerName: result.printerName ?? null };
 	}
 };

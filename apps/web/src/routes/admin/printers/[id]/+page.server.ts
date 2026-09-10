@@ -5,7 +5,14 @@ import { db } from '$lib/server/db';
 import { printers, amsUnits, amsSlots } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import { BAMBU_BASIC } from '$lib/server/bambu';
+import { manager } from '$lib/server/bambu/manager';
+import { refreshCloudAccounts } from '$lib/server/printers';
 import type { Actions, PageServerLoad } from './$types';
+
+async function ownedPrinter(orgId: string, id: string) {
+	const [p] = await db.select().from(printers).where(and(eq(printers.id, id), eq(printers.orgId, orgId))).limit(1);
+	return p ?? null;
+}
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	const me = requireAdmin(locals.user);
@@ -84,5 +91,39 @@ export const actions: Actions = {
 			})
 			.where(eq(amsSlots.id, d.slotId));
 		return { success: true };
+	},
+
+	// Add an AMS unit (4 empty slots) to set colors manually.
+	addAms: async ({ params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const existing = await db.select({ amsIndex: amsUnits.amsIndex }).from(amsUnits).where(eq(amsUnits.printerId, printer.id));
+		const nextIndex = existing.length ? Math.max(...existing.map((u) => u.amsIndex)) + 1 : 0;
+		await db.transaction(async (tx) => {
+			const [unit] = await tx.insert(amsUnits).values({ printerId: printer.id, amsIndex: nextIndex }).returning();
+			for (let s = 0; s < 4; s++) await tx.insert(amsSlots).values({ amsUnitId: unit.id, printerId: printer.id, slotIndex: s, empty: true });
+			await tx.update(printers).set({ hasAms: true, updatedAt: new Date() }).where(eq(printers.id, printer.id));
+		});
+		return { success: true, message: `Added AMS ${nextIndex + 1}.` };
+	},
+
+	removeAms: async ({ request, params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const unitId = String((await request.formData()).get('unitId'));
+		await db.delete(amsUnits).where(and(eq(amsUnits.id, unitId), eq(amsUnits.printerId, printer.id)));
+		return { success: true };
+	},
+
+	// Ask the printer to push its live AMS/status over MQTT, and re-sync from the cloud.
+	reloadAms: async ({ params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		await refreshCloudAccounts(me.orgId).catch(() => {});
+		const ok = await manager().requestStatus(printer.id);
+		return { success: true, message: ok ? 'Reloading from the printer…' : 'Requested a refresh (printer may be offline).' };
 	}
 };
