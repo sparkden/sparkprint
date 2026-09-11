@@ -206,6 +206,9 @@ export const actions: Actions = {
 		const patch: Record<string, unknown> = { ipAddress: ip || null, updatedAt: new Date() };
 		if (code) patch.accessCode = code; // don't wipe a synced code when the field is left blank
 		await db.update(printers).set(patch).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId)));
+		// Bring up (or refresh) the local MQTT connection so status/AMS/control start immediately.
+		if (ip) manager().connectLanPrinter(id).catch(() => {});
+		else manager().disconnectLanPrinter(id);
 		return { success: true, lanSaved: true };
 	},
 

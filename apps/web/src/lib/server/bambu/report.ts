@@ -30,6 +30,13 @@ function numOrNull(v: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
+/** Route a telemetry report by device serial alone (used by the LAN per-printer connection). */
+export async function applyReportByDevId(devId: string, print: any) {
+	if (!print || typeof print !== 'object') return;
+	const [printer] = await db.select().from(printers).where(eq(printers.devId, devId)).limit(1);
+	if (printer) await applyReportForPrinter(printer, print);
+}
+
 export async function applyReport(accountId: string, devId: string, print: any) {
 	if (!print || typeof print !== 'object') return;
 
@@ -39,6 +46,10 @@ export async function applyReport(accountId: string, devId: string, print: any) 
 		.where(and(eq(printers.devId, devId), eq(printers.bambuAccountId, accountId)))
 		.limit(1);
 	if (!printer) return; // device not imported (or not ours)
+	await applyReportForPrinter(printer, print);
+}
+
+async function applyReportForPrinter(printer: typeof printers.$inferSelect, print: any) {
 
 	// ── Telemetry ───────────────────────────────────────────────────────────────
 	const patch: Record<string, unknown> = { online: true, lastSeenAt: new Date(), updatedAt: new Date() };

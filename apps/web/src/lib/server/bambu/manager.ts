@@ -11,19 +11,21 @@
  */
 import type { MqttClient } from 'mqtt';
 import { connect } from 'mqtt';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
 import { bambuAccounts, printers } from '../db/schema';
 import { BAMBU_MODE, REGIONS, region as normRegion } from './config';
-import { applyReport } from './report';
+import { applyReport, applyReportByDevId } from './report';
 import { decrypt } from '../crypto';
 
 type Conn = { client: MqttClient; accountId: string; region: string; authFailed?: boolean };
+type LanConn = { client: MqttClient; printerId: string; devId: string };
 
 const g = globalThis as unknown as { __sparkBambu?: BambuManager };
 
 class BambuManager {
-	private conns = new Map<string, Conn>();
+	private conns = new Map<string, Conn>(); // per Bambu cloud account
+	private lanConns = new Map<string, LanConn>(); // per printer (local network)
 	private started = false;
 	private seq = 20000 + Math.floor((Date.now() % 9000));
 
@@ -32,12 +34,72 @@ class BambuManager {
 		return String(this.seq);
 	}
 
-	/** Connect all currently-connected accounts. Safe to call repeatedly. */
+	/** Connect LAN printers (preferred) and any cloud accounts. Safe to call repeatedly. */
 	async ensureStarted() {
-		if (BAMBU_MODE !== 'cloud' || this.started) return;
+		if (this.started) return;
 		this.started = true;
-		const accounts = await db.select().from(bambuAccounts).where(eq(bambuAccounts.status, 'connected'));
-		for (const a of accounts) this.connectAccount(a.id).catch((e) => console.error('[bambu] connect', e));
+		await this.ensureLanConnections();
+		if (BAMBU_MODE === 'cloud') {
+			const accounts = await db.select().from(bambuAccounts).where(eq(bambuAccounts.status, 'connected'));
+			for (const a of accounts) this.connectAccount(a.id).catch((e) => console.error('[bambu] connect', e));
+		}
+	}
+
+	/** Open a local MQTT connection to every printer that has a LAN IP + access code. */
+	async ensureLanConnections() {
+		const rows = await db
+			.select()
+			.from(printers)
+			.where(and(isNotNull(printers.ipAddress), isNotNull(printers.accessCode)));
+		for (const p of rows) this.connectLanPrinter(p.id).catch((e) => console.error('[bambu-lan] connect', e));
+	}
+
+	/** Connect (or reconnect) a single printer over its local network. */
+	async connectLanPrinter(printerId: string) {
+		const [p] = await db.select().from(printers).where(eq(printers.id, printerId)).limit(1);
+		if (!p?.ipAddress || !p.accessCode) return;
+		// Reconnect fresh if the IP/code changed.
+		this.disconnectLanPrinter(printerId);
+		const client = connect(`mqtts://${p.ipAddress}:8883`, {
+			username: 'bblp',
+			password: p.accessCode,
+			protocolVersion: 4,
+			keepalive: 30,
+			clean: true,
+			reconnectPeriod: 5000,
+			connectTimeout: 15000,
+			rejectUnauthorized: false, // printer self-signed cert
+			clientId: `sparkprint_lan_${printerId.slice(-8)}_${Math.floor(Math.random() * 1e6)}`
+		});
+		const conn: LanConn = { client, printerId, devId: p.devId };
+		this.lanConns.set(printerId, conn);
+		client.on('connect', () => {
+			client.subscribe(`device/${p.devId}/report`, { qos: 0 });
+			// Ask for a full snapshot (status, AMS, colors).
+			client.publish(`device/${p.devId}/request`, JSON.stringify({ pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }), { qos: 0 });
+			db.update(printers).set({ online: true, updatedAt: new Date() }).where(eq(printers.id, printerId)).catch(() => {});
+		});
+		client.on('message', async (_topic, payload) => {
+			try {
+				const json = JSON.parse(payload.toString());
+				if (json?.print) await applyReportByDevId(p.devId, json.print);
+			} catch {
+				/* ignore malformed */
+			}
+		});
+		client.on('error', (err: unknown) => console.error(`[bambu-lan] ${p.name}:`, (err as Error)?.message));
+	}
+
+	disconnectLanPrinter(printerId: string) {
+		const conn = this.lanConns.get(printerId);
+		if (conn) {
+			try {
+				conn.client.end(true);
+			} catch {
+				/* noop */
+			}
+			this.lanConns.delete(printerId);
+		}
 	}
 
 	async connectAccount(accountId: string) {
@@ -118,14 +180,23 @@ class BambuManager {
 		}
 	}
 
-	/** Publish a raw command to a printer (looked up by our printer id). */
+	/** Publish a raw command to a printer — prefers the local (LAN) connection, falls back to cloud. */
 	async command(printerId: string, payload: Record<string, unknown>, qos: 0 | 1 = 0): Promise<boolean> {
 		const [p] = await db.select().from(printers).where(eq(printers.id, printerId)).limit(1);
-		if (!p?.bambuAccountId) return false;
-		const conn = this.conns.get(p.bambuAccountId);
-		if (!conn || !conn.client.connected) return false;
-		conn.client.publish(`device/${p.devId}/request`, JSON.stringify(payload), { qos });
-		return true;
+		if (!p) return false;
+		const lan = this.lanConns.get(printerId);
+		if (lan?.client.connected) {
+			lan.client.publish(`device/${p.devId}/request`, JSON.stringify(payload), { qos });
+			return true;
+		}
+		if (p.bambuAccountId) {
+			const conn = this.conns.get(p.bambuAccountId);
+			if (conn?.client.connected) {
+				conn.client.publish(`device/${p.devId}/request`, JSON.stringify(payload), { qos });
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

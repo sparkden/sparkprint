@@ -131,18 +131,30 @@ async function pickProcess(profiles: string, model: string, layerHeightMm: numbe
 /** Choose a filament system profile for the requested material (Orca filaments cross-load). */
 async function pickFilament(profiles: string, type = 'PLA'): Promise<string> {
 	const files = await readdir(join(profiles, 'filament'));
-	const wanted = [
-		type, // exact, e.g. "PLA Matte"
-		`Bambu ${type} Basic @BBL X1C.json`,
-		`Bambu ${type} @BBL X1C.json`
-	];
-	// Prefer an exact "Bambu <type> ... @BBL X1C" main (0.4mm) profile.
 	const norm = (f: string) => f.replace(/\.json$/, '');
+	// 0.4mm ("main") @BBL X1C filament profiles — broadly compatible across Bambu machines.
 	const mains = files.filter((f) => /@BBL X1C\.json$/.test(f) && !/0\.\d nozzle/.test(f));
-	const byType = mains.find((f) => new RegExp(`Bambu ${type}( Basic)? @BBL X1C\\.json$`, 'i').test(f));
-	if (byType) return norm(byType);
-	const plaBasic = mains.find((f) => /Bambu PLA Basic @BBL X1C\.json$/.test(f));
-	return norm(plaBasic ?? mains[0] ?? 'Bambu PLA Basic @BBL X1C');
+	const has = (re: RegExp) => mains.find((f) => re.test(f));
+	const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+	// Material from the requested type, e.g. "Generic PETG" → "PETG", "PLA Matte" → "PLA Matte".
+	const generic = /generic/i.test(type);
+	const mat = type.replace(/generic/i, '').trim() || 'PLA';
+	const m = esc(mat);
+
+	// Try, in order: exact brand match, generic match, then a sensible default.
+	const candidates = generic
+		? [new RegExp(`^Generic ${m} @BBL X1C\\.json$`, 'i'), new RegExp(`^Bambu ${m}( Basic)? @BBL X1C\\.json$`, 'i')]
+		: [new RegExp(`^Bambu ${m}( Basic)? @BBL X1C\\.json$`, 'i'), new RegExp(`^Generic ${m} @BBL X1C\\.json$`, 'i')];
+	for (const re of candidates) {
+		const hit = has(re);
+		if (hit) return norm(hit);
+	}
+	// Fall back to the base material (drop sub-variants like "-CF"/"Matte"), then to PLA Basic.
+	const baseMat = esc(mat.split(/[\s-]/)[0]);
+	const baseHit = has(new RegExp(`^(Bambu|Generic) ${baseMat}( Basic)? @BBL X1C\\.json$`, 'i'));
+	if (baseHit) return norm(baseHit);
+	return norm(has(/^Bambu PLA Basic @BBL X1C\.json$/) ?? mains[0] ?? 'Bambu PLA Basic @BBL X1C');
 }
 
 function run(cmd: string, args: string[], timeoutMs = 300000): Promise<{ code: number; out: string }> {
