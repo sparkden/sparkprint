@@ -42,7 +42,7 @@
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2">
 			{#each data.printers as p}
-				<div class="card p-5 {p.enabled && p.printable ? '' : 'opacity-60'}">
+				<div class="card card-hover p-5 {p.enabled && p.printable ? '' : 'opacity-60'}">
 					<div class="flex items-start justify-between">
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-spark-soft text-spark-deep"><Icon name="printer" size={20} /></div>

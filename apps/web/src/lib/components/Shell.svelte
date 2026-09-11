@@ -37,7 +37,7 @@
 <div class="flex min-h-full bg-soft-paper">
 	<!-- Sidebar -->
 	<aside
-		class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full border-r border-warm-200 bg-surface transition-transform md:translate-x-0 {mobileOpen
+		class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full border-r border-warm-200 bg-surface shadow-sm transition-transform md:translate-x-0 md:shadow-none {mobileOpen
 			? 'translate-x-0'
 			: ''}"
 	>
@@ -49,12 +49,15 @@
 				<a
 					href={item.href}
 					onclick={() => (mobileOpen = false)}
-					class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors {active(
+					class="group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all {active(
 						item.href
 					)
-						? 'bg-spark-soft text-spark-deep'
-						: 'text-soft-ink hover:bg-warm-100'}"
+						? 'bg-spark-soft text-spark-deep shadow-xs ring-1 ring-spark/15'
+						: 'text-soft-ink hover:bg-warm-100 hover:text-ink'}"
 				>
+					{#if active(item.href)}
+						<span class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-spark"></span>
+					{/if}
 					<Icon name={item.icon} size={18} />
 					<span class="flex-1">{item.label}</span>
 					{#if item.badge}
@@ -103,7 +106,7 @@
 					<p class="text-xs capitalize leading-tight text-muted-ink">{user.role}</p>
 				</div>
 				<div
-					class="flex h-9 w-9 items-center justify-center rounded-full bg-spark text-sm font-semibold text-white"
+					class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-tangerine to-spark-deep text-sm font-semibold text-white shadow-spark ring-1 ring-white/40"
 				>
 					{initials}
 				</div>
