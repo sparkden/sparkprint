@@ -211,7 +211,15 @@ quotas, invites, approvals. Teachers can approve/monitor. Students import, desig
       supports/raft/infill/quality choices apply. Falls back to bundled Slic3r, then size estimate.
       Docker image ships OrcaSlicer v2.4.2 + xvfb (amd64).
 - [x] **Bambu cloud connect + live telemetry + pause/resume/stop** (MQTT manager, `cloud` mode)
-- [ ] **Bambu cloud print dispatch**: 3mf upload + `/my/task` + request signing (`cloudprint.ts`)
+- [x] **LAN print dispatch**: FTPS upload + MQTT `project_file` straight to the printer
+      (`bambu/lan.ts`), the reliable open path — works for all models, no developer mode. Set each
+      printer's IP + access code (Admin → Printers), or auto-fill via SSDP "Discover on network".
+      Requires the server on the printers' LAN. See `docs/LAN.md`.
+- [ ] **Cloud print dispatch** — not viable via the public API: `/my/task` only records a task and
+      the printer can't download a custom file without Bambu's closed networking plugin. Superseded
+      by LAN. (`cloudprint.ts`/`/api/print` kept but unused.)
+- [ ] **H2-series (H2D/H2C) slicing**: dual-extruder profiles + filament→extruder mapping so those
+      models can print (currently auto-excluded).
 - [ ] Bambu 2FA (authenticator) login flow; token refresh/expiry UX
 - [ ] Live progress via SSE/websockets (currently refresh-based)
 - [ ] Richer usage analytics (per-student/-month charts, exports)

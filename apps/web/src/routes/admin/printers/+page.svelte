@@ -35,13 +35,16 @@
 			<form method="POST" action="?/refresh" use:enhance style="display:inline">
 				<button class="btn btn-ghost btn-sm" title="Refresh from Bambu"><Icon name="refresh" size={16} /></button>
 			</form>
+			<form method="POST" action="?/discoverLan" use:enhance style="display:inline">
+				<button class="btn btn-ghost btn-sm" title="Scan the local network for printers (on-site only)"><Icon name="wifi" size={16} /> Discover on network</button>
+			</form>
 			<button class="btn btn-secondary btn-sm" onclick={() => (addOpen = true)}><Icon name="plus" size={16} /> Add manually</button>
 			<button class="btn btn-primary btn-sm" onclick={() => (connectOpen = true)}><Icon name="link" size={16} /> Connect Bambu</button>
 		{/snippet}
 	</PageHeader>
 
-	{#if form?.message}
-		<div class="mb-4 rounded-lg border border-success/30 bg-success/5 px-3.5 py-2.5 text-sm text-success">{form.message}</div>
+	{#if form?.message || form?.discover || form?.lanTest}
+		<div class="mb-4 rounded-lg border border-success/30 bg-success/5 px-3.5 py-2.5 text-sm text-success">{form.message ?? form.discover ?? form.lanTest}</div>
 	{:else if form?.error}
 		<div class="mb-4 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-sm text-danger">{form.error}</div>
 	{/if}
@@ -68,7 +71,7 @@
 						<div class="flex flex-col items-end gap-1">
 							<span class="badge {PRINTER_STATUS_META[p.status]?.badge ?? 'badge-neutral'}">{PRINTER_STATUS_META[p.status]?.label ?? p.status}</span>
 							{#if !p.printable}
-								<span class="badge badge-neutral" title="Bambu's cloud can't print to this model yet (combo/laser machine). It's kept out of the print queue automatically.">Cloud printing unsupported</span>
+								<span class="badge badge-neutral" title="This model isn't supported yet — H2-series dual-extruder slicing is in progress. Kept out of the print queue automatically.">Not supported yet</span>
 							{:else if !p.enabled}
 								<span class="badge badge-neutral" title="Manually excluded from the print queue.">Excluded</span>
 							{/if}
@@ -103,6 +106,33 @@
 						</div>
 					</div>
 
+					<!-- LAN printing setup: local IP + access code (required to actually print) -->
+					<div class="mt-3 border-t border-warm-200 pt-3">
+						<div class="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-ink">
+							LAN printing
+							{#if p.ipAddress && p.hasAccessCode}
+								<span class="badge badge-success">Ready</span>
+							{:else}
+								<span class="badge badge-warning">Setup needed</span>
+							{/if}
+						</div>
+						<form method="POST" action="?/setLan" use:enhance class="flex flex-wrap items-end gap-2 text-xs">
+							<input type="hidden" name="id" value={p.id} />
+							<label class="flex flex-col gap-1">
+								<span class="text-muted-ink">Local IP</span>
+								<input name="ipAddress" value={p.ipAddress ?? ''} placeholder="192.168.1.50" class="input" style="width:8.5rem;padding:.25rem .5rem" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span class="text-muted-ink">Access code{#if p.hasAccessCode} <span class="text-faint-ink">(saved)</span>{/if}</span>
+								<input name="accessCode" placeholder={p.hasAccessCode ? '••••••••' : '8-char code'} class="input" style="width:7.5rem;padding:.25rem .5rem" />
+							</label>
+							<button class="btn btn-secondary btn-sm">Save</button>
+							{#if p.ipAddress && p.hasAccessCode}
+								<button formaction="?/testLan" class="btn btn-ghost btn-sm" title="Test the connection to this printer">Test</button>
+							{/if}
+						</form>
+					</div>
+
 					<div class="mt-3 flex items-center gap-2">
 						<a href="/admin/printers/{p.id}" class="btn btn-secondary btn-sm flex-1"><Icon name="palette" size={15} /> Map colors</a>
 						{#if p.printable}
@@ -114,7 +144,7 @@
 								</button>
 							</form>
 						{:else}
-							<button class="btn btn-ghost btn-sm cursor-not-allowed opacity-60" disabled title="This model can't be cloud-printed yet, so it's excluded automatically.">Excluded</button>
+							<button class="btn btn-ghost btn-sm cursor-not-allowed opacity-60" disabled title="This model isn't supported yet (H2-series dual-extruder slicing in progress), so it's excluded automatically.">Excluded</button>
 						{/if}
 						<form method="POST" action="?/remove" use:enhance>
 							<input type="hidden" name="id" value={p.id} />

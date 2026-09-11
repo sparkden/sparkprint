@@ -29,6 +29,8 @@ export async function upsertDiscovered(
 					status: d.online ? 'idle' : 'offline',
 					hasAms: d.ams.length > 0,
 					nozzleDiameter: d.nozzleDiameter.toFixed(2),
+					// LAN access code (from the cloud bind list) — needed for local FTPS + MQTT printing.
+					accessCode: d.accessCode ?? existing.accessCode,
 					bambuAccountId: accountId ?? existing.bambuAccountId,
 					lastSeenAt: new Date(),
 					updatedAt: new Date()
@@ -48,6 +50,7 @@ export async function upsertDiscovered(
 					status: d.online ? 'idle' : 'offline',
 					hasAms: d.ams.length > 0,
 					nozzleDiameter: d.nozzleDiameter.toFixed(2),
+					accessCode: d.accessCode ?? null,
 					lastSeenAt: new Date()
 				})
 				.returning();

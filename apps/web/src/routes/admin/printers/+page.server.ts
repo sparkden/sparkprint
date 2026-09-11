@@ -36,8 +36,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 				.innerJoin(amsUnits, eq(amsSlots.amsUnitId, amsUnits.id))
 				.where(eq(amsSlots.printerId, p.id))
 				.orderBy(asc(amsUnits.amsIndex), asc(amsSlots.slotIndex));
-			// printable=false ⇒ model can't be cloud-printed (e.g. H2C combo/laser): auto-excluded.
-			return { ...p, slots, printable: isCloudPrintable(p.model) };
+			// Don't ship the raw LAN access code to the browser — just whether one is set.
+			const { accessCode, ...safe } = p;
+			return { ...safe, slots, hasAccessCode: !!accessCode, printable: isCloudPrintable(p.model) };
 		})
 	);
 
@@ -191,5 +192,60 @@ export const actions: Actions = {
 		const id = String((await request.formData()).get('id'));
 		await db.delete(printers).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId)));
 		return { success: true };
+	},
+
+	// Save a printer's LAN details (local IP + access code) for direct FTPS/MQTT printing.
+	setLan: async ({ request, locals }) => {
+		const me = requireAdmin(locals.user);
+		const fd = await request.formData();
+		const id = String(fd.get('id'));
+		const ip = String(fd.get('ipAddress') ?? '').trim();
+		const code = String(fd.get('accessCode') ?? '').trim();
+		if (ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return fail(400, { error: 'Enter a valid IPv4 address, e.g. 192.168.1.50.' });
+		if (code && !/^[a-zA-Z0-9]{6,16}$/.test(code)) return fail(400, { error: 'Access code looks off — it’s the 8-character LAN code from the printer screen.' });
+		const patch: Record<string, unknown> = { ipAddress: ip || null, updatedAt: new Date() };
+		if (code) patch.accessCode = code; // don't wipe a synced code when the field is left blank
+		await db.update(printers).set(patch).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId)));
+		return { success: true, lanSaved: true };
+	},
+
+	// Test the FTPS connection to a printer so setup problems surface immediately.
+	testLan: async ({ request, locals }) => {
+		const me = requireAdmin(locals.user);
+		const id = String((await request.formData()).get('id'));
+		const [p] = await db.select().from(printers).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId))).limit(1);
+		if (!p) return fail(404, { error: 'Printer not found.' });
+		if (!p.ipAddress || !p.accessCode) return fail(400, { error: 'Set the IP and access code first.' });
+		try {
+			const { Client } = await import('basic-ftp');
+			const c = new Client(12000);
+			await c.access({ host: p.ipAddress, port: 990, user: 'bblp', password: p.accessCode, secure: 'implicit', secureOptions: { rejectUnauthorized: false } });
+			c.close();
+			return { success: true, lanTest: `Connected to ${p.name} at ${p.ipAddress}. LAN printing is ready.` };
+		} catch (e) {
+			return fail(400, { error: `Couldn't reach ${p.name} at ${p.ipAddress}: ${(e as Error).message}. Check the IP, access code, and that this server is on the same network.` });
+		}
+	},
+
+	// Discover printers on the LAN via SSDP and fill in IPs for matching serials.
+	discoverLan: async ({ locals }) => {
+		const me = requireAdmin(locals.user);
+		const { discoverPrinters } = await import('$lib/server/bambu/discover');
+		const found = await discoverPrinters(4500);
+		let matched = 0;
+		for (const d of found) {
+			const res = await db
+				.update(printers)
+				.set({ ipAddress: d.ip, updatedAt: new Date() })
+				.where(and(eq(printers.orgId, me.orgId), eq(printers.devId, d.serial)))
+				.returning({ id: printers.id });
+			matched += res.length;
+		}
+		return {
+			success: true,
+			discover: found.length
+				? `Found ${found.length} printer(s) on the network; matched ${matched} to your printers.`
+				: 'No printers found on the network. Make sure this server is on the same LAN/VLAN as the printers.'
+		};
 	}
 };

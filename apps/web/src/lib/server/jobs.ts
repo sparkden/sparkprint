@@ -8,19 +8,16 @@ import {
 	amsUnits,
 	amsSlots,
 	orgs,
-	bambuAccounts,
 	type ColorRequest,
 	type ColorMapping
 } from './db/schema';
 import { getEstimator, type SliceInput } from './slicer';
 import { canSubmit } from './quota';
-import { BAMBU_MODE, region as normRegion } from './bambu/config';
+import { BAMBU_MODE } from './bambu/config';
 import { colorDistance } from '$lib/color';
-import { decrypt, signId } from './crypto';
 import { readBuffer, objectExists } from './storage';
-import { publicOrigin } from './public-origin';
 import { enqueueSlice } from './queue';
-import { sendCloudPrint, md5Hex } from './bambu/cloudprint';
+import { lanPrint } from './bambu/lan';
 
 // ── Events / timeline ─────────────────────────────────────────────────────────
 export async function logEvent(
@@ -151,52 +148,39 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			return 'printing';
 		}
 
-		// ── Real cloud dispatch ──────────────────────────────────────────────────
+		// ── LAN dispatch (FTPS upload + MQTT project_file) ───────────────────────
+		// The reliable, open path: upload the sliced 3mf straight to the printer and tell it to
+		// print. Requires the printer's local IP + LAN access code, and the server on the same
+		// network as the printers. See docs/LAN.md.
 		if (!job.gcodeKey || !objectExists(job.gcodeKey)) {
 			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
 			await logEvent(jobId, 'dispatch', 'Waiting on sliced file before sending');
 			return 'queued';
 		}
-		if (!p.bambuAccountId) {
-			await logEvent(jobId, 'error', `${p.name} has no connected Bambu account`);
-			continue;
-		}
-		const [acct] = await db.select().from(bambuAccounts).where(eq(bambuAccounts.id, p.bambuAccountId)).limit(1);
-		const token = decrypt(acct?.accessToken);
-		if (!acct || !token) {
-			await logEvent(jobId, 'error', 'Bambu account token unavailable — reconnect the account');
-			continue;
-		}
-
-		// The printer downloads the sliced 3mf from a public URL we host; build it now. Without a
-		// known public origin the printer couldn't fetch the file, so hold the job rather than
-		// dispatch a link that will fail verification.
-		const origin = await publicOrigin();
-		if (!origin) {
-			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: 'no public URL yet', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-			await logEvent(jobId, 'error', 'Cannot reach the printer yet — open SparkPrint in a browser (or set PRINT_PUBLIC_ORIGIN) so the printer can download the file.');
+		if (!p.ipAddress || !p.accessCode) {
+			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: 'LAN not configured', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+			await logEvent(jobId, 'error', `${p.name} needs its local IP + access code set for LAN printing (Admin → Printers → Set up LAN). See docs/LAN.md.`, { printerId: p.id });
 			return 'queued';
 		}
 		const threeMf = await readBuffer(job.gcodeKey);
-		const fileUrl = `${origin}/api/print/${signId(jobId)}.gcode.3mf`;
 		// Bambu ams_mapping: index = filament slot in the 3mf; value = global AMS tray id (ams*4+slot).
 		const amsMapping = mapping.map((m) => m.amsIndex * 4 + m.slotIndex);
-
-		const send = await sendCloudPrint({
-			accessToken: token,
-			region: normRegion(acct.region),
-			devId: p.devId,
-			jobName: job.name,
-			fileUrl,
-			md5: md5Hex(threeMf),
-			plateIdx: 1,
-			bedType: 'textured_plate',
-			amsMapping
-		});
-
-		if (!send.ok) {
-			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: send.error ?? 'send failed', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-			await logEvent(jobId, 'error', `Cloud send failed: ${send.error ?? 'unknown'}`, { printerId: p.id });
+		try {
+			await lanPrint({
+				ip: p.ipAddress,
+				accessCode: p.accessCode,
+				serial: p.devId,
+				data: threeMf,
+				fileName: `${jobId}.gcode.3mf`,
+				amsMapping,
+				useAms: mapping.length > 0,
+				bedType: 'textured_plate',
+				plateIdx: 1
+			});
+		} catch (e) {
+			const msg = (e as Error).message;
+			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: msg, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+			await logEvent(jobId, 'error', `Couldn't start the print on ${p.name}: ${msg}. Check the printer's IP/access code and that the server is on the same network.`, { printerId: p.id });
 			return 'queued';
 		}
 
@@ -204,7 +188,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			await tx.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'sending', startedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId));
 			await tx.update(printers).set({ currentJobId: jobId, updatedAt: new Date() }).where(eq(printers.id, p.id));
 		});
-		await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, taskId: send.taskId, mapping });
+		await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });
 		return 'printing';
 	}
 

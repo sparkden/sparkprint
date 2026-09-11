@@ -128,6 +128,54 @@ class BambuManager {
 		return true;
 	}
 
+	/**
+	 * Start a cloud/URL print, exactly as BambuStudio's `command_project_file` does: the printer
+	 * downloads the 3mf from `url`, verifies it against `md5`, and prints the plate's gcode
+	 * (`param` = the gcode path inside the 3mf). Creating a /my/task record alone does NOT start a
+	 * print — this MQTT command is what actually kicks it off.
+	 */
+	printProjectFile(
+		printerId: string,
+		p: {
+			url: string;
+			md5: string;
+			subtaskName: string;
+			amsMapping: number[];
+			bedType?: string;
+			taskId?: string;
+			projectId?: string;
+			profileId?: string;
+			plateIdx?: number;
+		}
+	) {
+		const useAms = p.amsMapping.length > 0;
+		return this.command(
+			printerId,
+			{
+				print: {
+					command: 'project_file',
+					sequence_id: this.nextSeq(),
+					param: `Metadata/plate_${p.plateIdx ?? 1}.gcode`,
+					url: p.url,
+					md5: p.md5,
+					subtask_name: p.subtaskName,
+					project_id: p.projectId ?? '0',
+					profile_id: p.profileId ?? '0',
+					task_id: p.taskId ?? '0',
+					subtask_id: '0',
+					bed_type: p.bedType ?? 'auto',
+					use_ams: useAms,
+					ams_mapping: useAms ? p.amsMapping : [0],
+					timelapse: false,
+					bed_leveling: true,
+					flow_cali: false,
+					vibration_cali: true,
+					layer_inspect: false
+				}
+			},
+			1
+		);
+	}
 	/** Ask a printer to push its full status (incl. AMS) — used by the "Reload AMS" button. */
 	requestStatus(printerId: string) {
 		return this.command(printerId, { pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }, 0);
