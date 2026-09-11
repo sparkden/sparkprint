@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import Icon from '$lib/components/Icon.svelte';
+	import PrinterCamera from '$lib/components/PrinterCamera.svelte';
 	import { JOB_STATUS_META, fmtGrams, fmtDuration, timeAgo } from '$lib/status';
 	let { data } = $props();
 
@@ -58,6 +59,7 @@
 			{#if active && job.printerId}
 				<div class="mt-5 rounded-xl border border-spark/20 bg-spark-soft/40 p-4">
 					<p class="text-sm font-semibold text-spark-deep">Printing now on {data.printerName}</p>
+					<div class="mt-3"><PrinterCamera printerId={job.printerId} label="Watch your print" /></div>
 				</div>
 			{/if}
 

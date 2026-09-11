@@ -86,7 +86,19 @@ used for prints.
 
 ---
 
-## 5. How a print flows
+## 5. Live camera
+
+Once a printer has its IP + access code, its **camera** shows up too:
+
+- **Admins** see a *Live camera* toggle on every printer (Admin → Printers).
+- **Students** get a *Watch your print* view on their job page **only while their print is running
+  on that printer**.
+
+Turn on **LAN Live View** on the printer (`Settings → General → LAN Mode`, or the camera settings)
+and keep it on. P1P/P1S/A1 stream over the chamber protocol (port 6000); X1/H2 stream over RTSPS
+(port 322) and need `ffmpeg` on the server (the Pi installer includes it). The P1P has no camera.
+
+## 6. How a print flows
 
 1. A student uploads a model and picks a color → SparkPrint slices it (OrcaSlicer, real Bambu
    G-code) into a `.gcode.3mf`.
@@ -97,7 +109,7 @@ used for prints.
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
@@ -110,7 +122,7 @@ used for prints.
 
 ---
 
-## 7. Security notes
+## 8. Security notes
 
 - Access codes are stored encrypted and never sent to the browser (the admin UI only shows
   whether one is set).

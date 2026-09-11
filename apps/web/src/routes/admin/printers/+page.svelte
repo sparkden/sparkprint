@@ -3,6 +3,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import PrinterCamera from '$lib/components/PrinterCamera.svelte';
 	import { PRINTER_STATUS_META } from '$lib/status';
 	import { BAMBU_MODELS } from '$lib/bambuModels';
 	let { data, form } = $props();
@@ -96,6 +97,10 @@
 						</div>
 					{:else}
 						<p class="mt-4 text-xs text-muted-ink">No AMS attached.</p>
+					{/if}
+
+					{#if p.ipAddress && p.hasAccessCode}
+						<div class="mt-4"><PrinterCamera printerId={p.id} /></div>
 					{/if}
 
 					<div class="mt-3 flex items-center justify-between border-t border-warm-200 pt-3 text-xs">

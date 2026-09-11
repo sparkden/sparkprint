@@ -70,10 +70,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Build tools, headless-GL libs for OrcaSlicer, fonts, and git/curl.
 apt-get install -y -qq \
-  ca-certificates curl git build-essential xvfb \
+  ca-certificates curl git build-essential xvfb ffmpeg \
   libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
   libwebkit2gtk-4.1-0 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
-  || apt-get install -y -qq ca-certificates curl git build-essential xvfb libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
+  || apt-get install -y -qq ca-certificates curl git build-essential xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
 ok "Base packages installed."
 
 # Node.js
