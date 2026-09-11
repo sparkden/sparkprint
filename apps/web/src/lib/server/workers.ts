@@ -4,8 +4,8 @@
  *   - `slice`    → runs the CLI slicer (OrcaSlicer/Prusa/…) if available, stores the sliced
  *                  file, then hands off to dispatch. Falls back to the size estimate when no
  *                  slicer is configured, so the queue never gets stuck.
- *   - `dispatch` → sends the sliced file to the printer via Bambu's cloud (the same
- *                  create-project → upload → /my/task flow Bambu Studio uses).
+ *   - `dispatch` → uploads the sliced file to the printer over the LAN (FTPS) and starts it
+ *                  (MQTT project_file), the way Bambu Studio's LAN mode does.
  * A separate services/slicer container can also subscribe to `slice` to scale out; pg-boss
  * hands each job to exactly one worker.
  */
@@ -19,7 +19,6 @@ import { objectFsPath, putBuffer } from './storage';
 import { realSlice, slicerAvailable } from './slicer-cli';
 import { ensureSlicer } from './ensure-slicer';
 import { orcaAvailable } from './orca';
-import { loadPublicOrigin } from './public-origin';
 
 const g = globalThis as unknown as { __sparkWorkers?: boolean };
 
@@ -72,13 +71,12 @@ async function sliceJob(jobId: string) {
 		.where(eq(printJobs.id, jobId));
 	await logEvent(jobId, 'slice', `Sliced — ${Math.round(result.grams || Number(job.estimatedGrams ?? 0))} g`);
 
-	await enqueueDispatch(jobId); // send it to the printer via the cloud
+	await enqueueDispatch(jobId); // send it to the printer over the local network
 }
 
 export async function startWorkers() {
 	if (g.__sparkWorkers) return;
 	g.__sparkWorkers = true;
-	await loadPublicOrigin(); // restore the printer-reachable base URL learned in a prior run
 	const boss = await getBoss();
 
 	await boss.work(SLICE_QUEUE, { batchSize: 1 }, async (jobs: unknown) => {

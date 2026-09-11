@@ -5,7 +5,7 @@ import { manager } from '$lib/server/bambu/manager';
 import { startWorkers } from '$lib/server/workers';
 import { isInitialized } from '$lib/server/setup';
 
-// Boot once per server process (no-ops unless BAMBU_MODE=cloud).
+// Boot once per server process: open local MQTT connections to configured printers.
 manager()
 	.ensureStarted()
 	.catch((e) => console.error('[bambu] ensureStarted failed', e));

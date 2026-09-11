@@ -6,7 +6,6 @@ import { printers, amsUnits, amsSlots } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import { BAMBU_BASIC } from '$lib/server/bambu';
 import { manager } from '$lib/server/bambu/manager';
-import { refreshCloudAccounts } from '$lib/server/printers';
 import type { Actions, PageServerLoad } from './$types';
 
 async function ownedPrinter(orgId: string, id: string) {
@@ -117,14 +116,13 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	// Ask the printer to push its live AMS/status over MQTT, and re-sync from the cloud.
+	// Ask the printer to push its live AMS/status over the local MQTT link.
 	reloadAms: async ({ params, locals }) => {
 		const me = requireAdmin(locals.user);
 		const printer = await ownedPrinter(me.orgId, params.id);
 		if (!printer) return fail(404, { error: 'Printer not found' });
-		await refreshCloudAccounts(me.orgId).catch(() => {});
 		const ok = await manager().requestStatus(printer.id);
-		return { success: true, message: ok ? 'Reloading from the printer…' : 'Requested a refresh (printer may be offline).' };
+		return { success: true, message: ok ? 'Reloading from the printer…' : 'Printer not connected — check its LAN IP/access code.' };
 	},
 
 	// Unload the currently-loaded filament back into the AMS.

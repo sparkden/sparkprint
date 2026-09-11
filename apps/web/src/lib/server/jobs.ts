@@ -13,7 +13,6 @@ import {
 } from './db/schema';
 import { getEstimator, type SliceInput } from './slicer';
 import { canSubmit } from './quota';
-import { BAMBU_MODE } from './bambu/config';
 import { colorDistance } from '$lib/color';
 import { readBuffer, objectExists } from './storage';
 import { enqueueSlice } from './queue';
@@ -137,16 +136,6 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			});
 		}
 		if (!ok) continue;
-
-		// Dev-only mock fallback: no real account, just simulate a start.
-		if (BAMBU_MODE === 'mock') {
-			await db.transaction(async (tx) => {
-				await tx.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'printing', startedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-				await tx.update(printers).set({ status: 'printing', currentJobId: jobId, progressPct: 0, updatedAt: new Date() }).where(eq(printers.id, p.id));
-			});
-			await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });
-			return 'printing';
-		}
 
 		// ── LAN dispatch (FTPS upload + MQTT project_file) ───────────────────────
 		// The reliable, open path: upload the sliced 3mf straight to the printer and tell it to

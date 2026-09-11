@@ -8,24 +8,7 @@
 	import { BAMBU_MODELS } from '$lib/bambuModels';
 	let { data, form } = $props();
 
-	let connectOpen = $state(false);
 	let addOpen = $state(false);
-
-	// Cloud connect is two-step: login → (maybe) verification code.
-	let showCode = $state(false);
-	let pendingEmail = $state('');
-	let pendingRegion = $state('us');
-	$effect(() => {
-		if (form?.needCode) {
-			showCode = true;
-			pendingEmail = form.email ?? '';
-			pendingRegion = form.region ?? 'us';
-			connectOpen = true;
-		}
-	});
-	function resetConnect() {
-		showCode = false;
-	}
 </script>
 
 <svelte:head><title>Printers · SparkPrint Admin</title></svelte:head>
@@ -33,14 +16,10 @@
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="Printers" subtitle="{data.printers.length} printer{data.printers.length === 1 ? '' : 's'} · {data.printers.filter((p) => p.online).length} online">
 		{#snippet actions()}
-			<form method="POST" action="?/refresh" use:enhance style="display:inline">
-				<button class="btn btn-ghost btn-sm" title="Refresh from Bambu"><Icon name="refresh" size={16} /></button>
-			</form>
 			<form method="POST" action="?/discoverLan" use:enhance style="display:inline">
-				<button class="btn btn-ghost btn-sm" title="Scan the local network for printers (on-site only)"><Icon name="wifi" size={16} /> Discover on network</button>
+				<button class="btn btn-secondary btn-sm" title="Scan the local network for printers (on-site only)"><Icon name="wifi" size={16} /> Discover on network</button>
 			</form>
-			<button class="btn btn-secondary btn-sm" onclick={() => (addOpen = true)}><Icon name="plus" size={16} /> Add manually</button>
-			<button class="btn btn-primary btn-sm" onclick={() => (connectOpen = true)}><Icon name="link" size={16} /> Connect Bambu</button>
+			<button class="btn btn-primary btn-sm" onclick={() => (addOpen = true)}><Icon name="plus" size={16} /> Add printer</button>
 		{/snippet}
 	</PageHeader>
 
@@ -54,8 +33,11 @@
 		<div class="card flex flex-col items-center justify-center p-12 text-center">
 			<div class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-warm-100 text-muted-ink"><Icon name="printer" size={24} /></div>
 			<p class="text-sm text-soft-ink">No printers yet.</p>
-			<p class="mt-1 text-xs text-muted-ink">Connect your school's Bambu account to import them automatically.</p>
-			<button class="btn btn-primary btn-sm mt-4" onclick={() => (connectOpen = true)}>Connect Bambu account</button>
+			<p class="mt-1 text-xs text-muted-ink">Scan your network to find printers automatically, or add one by hand.</p>
+			<div class="mt-4 flex gap-2">
+				<form method="POST" action="?/discoverLan" use:enhance><button class="btn btn-secondary btn-sm"><Icon name="wifi" size={15} /> Discover on network</button></form>
+				<button class="btn btn-primary btn-sm" onclick={() => (addOpen = true)}><Icon name="plus" size={15} /> Add printer</button>
+			</div>
 		</div>
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2">
@@ -162,58 +144,9 @@
 	{/if}
 </div>
 
-<!-- Connect Bambu -->
-<Modal bind:open={connectOpen} title="Connect Bambu account">
-	{#if showCode}
-		<!-- Cloud step 2: verification code -->
-		<p class="-mt-2 mb-4 text-sm text-soft-ink">Enter the verification code Bambu emailed to <span class="font-semibold text-ink">{pendingEmail}</span>.</p>
-		<form method="POST" action="?/bambuVerify" use:enhance={() => {
-			return async ({ update, result }) => { await update(); if (result.type === 'success') { connectOpen = false; resetConnect(); } };
-		}} class="space-y-4">
-			<input type="hidden" name="email" value={pendingEmail} />
-			<input type="hidden" name="region" value={pendingRegion} />
-			<div>
-				<label class="label" for="code">Verification code</label>
-				<input class="input tracking-widest" id="code" name="code" inputmode="numeric" placeholder="123456" autocomplete="one-time-code" required />
-			</div>
-			{#if form?.error}<p class="text-sm text-danger">{form.error}</p>{/if}
-			<div class="flex justify-between gap-2 pt-2">
-				<button type="button" class="btn btn-ghost" onclick={resetConnect}>← Back</button>
-				<button class="btn btn-primary">Verify & import</button>
-			</div>
-		</form>
-	{:else}
-		<!-- Cloud step 1: credentials -->
-		<p class="-mt-2 mb-3 text-sm text-soft-ink">Sign in with your school's Bambu Lab account to import every printer and its AMS, and stream live status.</p>
-		<div class="mb-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-[#a35f00]">
-			⚠ Bambu allows one active session per account — connecting here may sign out the Bambu Handy app. Use a <strong>dedicated lab account</strong> to avoid disruption.
-		</div>
-		<form method="POST" action="?/bambuLogin" use:enhance={() => {
-			return async ({ update, result }) => { await update(); if (result.type === 'success') connectOpen = false; };
-		}} class="space-y-4">
-			<div>
-				<label class="label" for="be">Bambu account email</label>
-				<input class="input" id="be" name="email" type="email" placeholder="lab@school.edu" required />
-			</div>
-			<div>
-				<label class="label" for="bp">Password</label>
-				<input class="input" id="bp" name="password" type="password" required />
-			</div>
-			<div>
-				<label class="label" for="br">Region</label>
-				<select class="select" id="br" name="region"><option value="us">United States / Global</option><option value="eu">Europe</option><option value="cn">China</option></select>
-			</div>
-			{#if form?.error}<p class="text-sm text-danger">{form.error}</p>{/if}
-			<div class="flex justify-end gap-2 pt-2">
-				<button type="button" class="btn btn-secondary" onclick={() => (connectOpen = false)}>Cancel</button>
-				<button class="btn btn-primary">Sign in & import</button>
-			</div>
-		</form>
-	{/if}
-</Modal>
-
-<!-- Add manual -->
-<Modal bind:open={addOpen} title="Add a printer manually">
+<!-- Add printer -->
+<Modal bind:open={addOpen} title="Add a printer">
+	<p class="-mt-2 mb-4 text-sm text-soft-ink">Find these on the printer's screen under <span class="font-medium text-ink">Settings → Network / LAN Mode</span>. See the LAN setup guide.</p>
 	<form method="POST" action="?/addManual" use:enhance={() => {
 		return async ({ update, result }) => { await update(); if (result.type === 'success') addOpen = false; };
 	}} class="space-y-4">
@@ -225,12 +158,10 @@
 				</select>
 			</div>
 			<div><label class="label" for="pd">Serial / device ID</label><input class="input" id="pd" name="devId" placeholder="01S00A..." required /></div>
-			<div><label class="label" for="pl">Location</label><input class="input" id="pl" name="location" placeholder="Room 204" /></div>
-			<div><label class="label" for="pa">Access code <span class="font-normal text-muted-ink">(LAN)</span></label><input class="input" id="pa" name="accessCode" placeholder="Optional" /></div>
-			<div><label class="label" for="pc">AMS units</label>
-				<select class="select" id="pc" name="amsCount"><option value="0">None</option><option value="1">1 (4 slots)</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
-			</div>
+			<div><label class="label" for="pi">Local IP</label><input class="input" id="pi" name="ipAddress" placeholder="192.168.1.50" /></div>
+			<div class="sm:col-span-2"><label class="label" for="pa">LAN access code</label><input class="input" id="pa" name="accessCode" placeholder="8-character code" /></div>
 		</div>
+		{#if form?.error}<p class="text-sm text-danger">{form.error}</p>{/if}
 		<div class="flex justify-end gap-2 pt-2">
 			<button type="button" class="btn btn-secondary" onclick={() => (addOpen = false)}>Cancel</button>
 			<button class="btn btn-primary">Add printer</button>
