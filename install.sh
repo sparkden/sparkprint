@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  SparkPrint — Raspberry Pi 5 one-shot installer
+#  SparkPrint — one-shot on-site installer
 # ------------------------------------------------------------------------------
-#  Turns a fresh Raspberry Pi 5 (Raspberry Pi OS 64-bit) into a self-contained
-#  SparkPrint "print server" appliance:
+#  Turns a fresh Linux box into a self-contained SparkPrint "print server" appliance.
+#  Works on Debian family (Debian / Ubuntu / Raspberry Pi OS, apt) and Arch family
+#  (Arch / Manjaro, pacman); aarch64 (Pi 5) or x86_64. Steps:
 #    • connects Wi-Fi (if not already online)
 #    • installs Node, OrcaSlicer (headless), and all system deps
 #    • stores data in a local SQLite file (nothing to configure)
@@ -42,11 +43,17 @@ askyn(){ local p="$1" d="${2:-y}" r; read -rp "  $p ($([ "$d" = y ] && echo 'Y/n
 step "SparkPrint installer"
 [ "$(id -u)" -eq 0 ] || die "Please run with sudo:  sudo bash install.sh"
 ARCH="$(uname -m)"
-[ "$ARCH" = "aarch64" ] || warn "Expected a 64-bit Pi (aarch64); found $ARCH. Continuing anyway."
+case "$ARCH" in aarch64|x86_64) ;; *) warn "Untested architecture ($ARCH); expected aarch64 or x86_64. Continuing anyway." ;; esac
 . /etc/os-release 2>/dev/null || true
 echo "  OS: ${PRETTY_NAME:-unknown} · arch: $ARCH"
 GLIBC="$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo 0)"
 SUDO_USER_HOME="$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)"
+
+# Package manager (Debian/Ubuntu/Raspberry Pi OS → apt; Arch/Manjaro → pacman).
+if command -v apt-get >/dev/null 2>&1; then PM=apt
+elif command -v pacman >/dev/null 2>&1; then PM=pacman
+else die "Unsupported distro — need apt (Debian family) or pacman (Arch family)."; fi
+echo "  Package manager: $PM"
 
 # ── 1. Wi-Fi ──────────────────────────────────────────────────────────────────
 step "1/9  Network"
@@ -66,28 +73,40 @@ fi
 
 # ── 2. System packages ─────────────────────────────────────────────────────────
 step "2/9  System packages"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-# Build tools, headless-GL libs for OrcaSlicer, fonts, and git/curl.
-apt-get install -y -qq \
-  ca-certificates curl git build-essential python3 xvfb ffmpeg \
-  libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
-  libwebkit2gtk-4.1-0 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
-  || apt-get install -y -qq ca-certificates curl git build-essential xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
+# Build tools, headless-GL libs for OrcaSlicer, fonts, curl/git, python (native sqlite build).
+if [ "$PM" = apt ]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq \
+    ca-certificates curl git build-essential python3 xvfb ffmpeg \
+    libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
+    libwebkit2gtk-4.1-0 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
+    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
+else
+  # Arch: base-devel (gcc/make), Xvfb, and the AppImage's GL/GTK runtime libs.
+  pacman -Sy --needed --noconfirm \
+    ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg \
+    mesa libglvnd glu gtk3 gcc-libs nss libsecret webkit2gtk-4.1 fontconfig ttf-dejavu >/dev/null 2>&1 \
+    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret fontconfig ttf-dejavu >/dev/null
+fi
 ok "Base packages installed."
 
 # Node.js
 if command -v node >/dev/null 2>&1 && [ "$(node -v | grep -oE '[0-9]+' | head -1)" -ge "$NODE_MAJOR" ] 2>/dev/null; then
   ok "Node $(node -v) already present."
-else
+elif [ "$PM" = apt ]; then
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null 2>&1
   apt-get install -y -qq nodejs >/dev/null
+  ok "Installed Node $(node -v)."
+else
+  pacman -Sy --needed --noconfirm nodejs npm >/dev/null
   ok "Installed Node $(node -v)."
 fi
 
 # ── 3. App user + code ──────────────────────────────────────────────────────────
 step "3/9  Application files"
-id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --home-dir "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
+NOLOGIN="$(command -v nologin || echo /usr/sbin/nologin)"
+id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --home-dir "$APP_DIR" --shell "$NOLOGIN" "$APP_USER"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH" -q && git -C "$APP_DIR" reset --hard "origin/$BRANCH" -q
   ok "Updated existing checkout in $APP_DIR."
@@ -122,8 +141,11 @@ else
     warn "For full OrcaSlicer support, use Raspberry Pi OS 'Trixie' (64-bit) or newer."
   else
     mkdir -p "$ORCA_DIR"
-    URL="https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCA_VERSION}.AppImage"
-    echo "  Downloading OrcaSlicer $ORCA_VERSION (aarch64)…"
+    # aarch64 (Pi) vs x86_64 (most Arch/desktop boxes) — Bambu's x64 AppImage has no arch suffix.
+    if [ "$ARCH" = "aarch64" ]; then ORCA_ASSET="OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCA_VERSION}.AppImage"
+    else ORCA_ASSET="OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCA_VERSION}.AppImage"; fi
+    URL="https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/${ORCA_ASSET}"
+    echo "  Downloading OrcaSlicer $ORCA_VERSION ($ARCH)…"
     if curl -fsSL "$URL" -o "$ORCA_DIR/orca.AppImage"; then
       chmod +x "$ORCA_DIR/orca.AppImage"
       ( cd "$ORCA_DIR" && ./orca.AppImage --appimage-extract >/dev/null 2>&1 ) && rm -f "$ORCA_DIR/orca.AppImage"
@@ -204,8 +226,10 @@ EOF
 if askyn "Set up a Cloudflare Tunnel now?"; then
   if ! command -v cloudflared >/dev/null 2>&1; then
     echo "  Installing cloudflared…"
-    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb" -o /tmp/cf.deb \
-      && apt-get install -y -qq /tmp/cf.deb >/dev/null && rm -f /tmp/cf.deb && ok "cloudflared installed." || warn "cloudflared install failed."
+    CF_ARCH="$([ "$ARCH" = "aarch64" ] && echo arm64 || echo amd64)"
+    # Portable static binary — works on Debian and Arch alike.
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" -o /usr/local/bin/cloudflared \
+      && chmod +x /usr/local/bin/cloudflared && ok "cloudflared installed." || warn "cloudflared install failed."
   fi
   if command -v cloudflared >/dev/null 2>&1; then
     echo -e "\n  ${B}A browser login link will appear. Open it, pick your domain, and authorize.${N}"

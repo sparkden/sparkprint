@@ -3,6 +3,10 @@
 SparkPrint runs as a small always-on appliance on a **Raspberry Pi 5** on the same network as your
 printers. One script installs everything and runs it on boot — no Docker.
 
+> The installer also runs on any **Debian-family** (Debian / Ubuntu, `apt`) or **Arch-family**
+> (Arch / Manjaro, `pacman`) machine — aarch64 or x86_64 — if you'd rather use a mini-PC or spare
+> laptop instead of a Pi. The steps below are identical.
+
 ## What you need
 
 - **Raspberry Pi 5** (4 GB+), a good power supply, and a microSD (32 GB+) or NVMe.
