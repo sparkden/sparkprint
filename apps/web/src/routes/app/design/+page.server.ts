@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { models, printers, amsUnits, amsSlots } from '$lib/server/db/schema';
+import { randomUUID } from 'node:crypto';
 import { putBuffer } from '$lib/server/storage';
 import { submitJob, CLOUD_PRINTABLE_MODELS } from '$lib/server/jobs';
+import { metricsFrom3mf, isSliced3mf } from '$lib/server/threemf-metrics';
 import { getUsage } from '$lib/server/quota';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -181,6 +183,61 @@ export const actions: Actions = {
 			process
 		});
 
+		if (!result.ok) return fail(400, { error: result.error });
+		return { success: true, jobId: result.jobId, status: result.status, printerName: result.printerName ?? null };
+	},
+
+	// Print a file already sliced in Bambu Studio / OrcaSlicer (a .gcode.3mf) — skips our slicer.
+	uploadSliced: async ({ request, locals }) => {
+		const user = locals.user!;
+		const fd = await request.formData();
+		const file = fd.get('file');
+		if (!(file instanceof File) || file.size === 0) return fail(400, { error: 'Choose a sliced .gcode.3mf file.' });
+		if (file.size > 200 * 1024 * 1024) return fail(400, { error: 'File is too large (200 MB max).' });
+		const buf = Buffer.from(await file.arrayBuffer());
+		if (!isSliced3mf(buf)) {
+			return fail(400, { error: 'That isn’t a sliced Bambu file. In Bambu Studio, slice your plate, then File → Export → Export plate sliced file (.gcode.3mf).' });
+		}
+
+		const parsed = z
+			.object({
+				name: z.string().min(1).max(80),
+				colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+				colorName: z.string().max(60).optional(),
+				filamentType: z.string().max(20),
+				copies: z.coerce.number().int().min(1).max(20),
+				printerModelTarget: z.preprocess((v) => (v && v !== 'auto' ? String(v) : null), z.string().nullable())
+			})
+			.safeParse({
+				name: fd.get('name') || file.name.replace(/\.gcode\.3mf$/i, ''),
+				colorHex: fd.get('colorHex'),
+				colorName: fd.get('colorName') ?? undefined,
+				filamentType: fd.get('filamentType') ?? 'PLA',
+				copies: fd.get('copies') ?? 1,
+				printerModelTarget: fd.get('printerModelTarget')
+			});
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
+		const d = parsed.data;
+
+		const key = `org/${user.orgId}/uploads/${randomUUID()}.gcode.3mf`;
+		await putBuffer(key, buf);
+		const { grams, timeSec } = metricsFrom3mf(buf);
+
+		const result = await submitJob({
+			orgId: user.orgId,
+			userId: user.id,
+			modelId: null,
+			name: d.name,
+			colorRequest: [{ filamentType: d.filamentType, colorHex: d.colorHex, colorName: d.colorName }],
+			layerHeightMm: 0.2,
+			infillPct: 15,
+			supports: false,
+			copies: d.copies,
+			printerModelTarget: d.printerModelTarget,
+			preslicedKey: key,
+			preslicedGrams: grams,
+			preslicedTimeSec: timeSec
+		});
 		if (!result.ok) return fail(400, { error: result.error });
 		return { success: true, jobId: result.jobId, status: result.status, printerName: result.printerName ?? null };
 	}

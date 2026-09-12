@@ -10,6 +10,7 @@
 	let supports = $state(false);
 	let raft = $state(false);
 	let copies = $state(1);
+	let mode = $state<'design' | 'upload'>('design'); // 'upload' = print a Bambu Studio .gcode.3mf
 	let stats = $state<{ bbox: { x: number; y: number; z: number }; volumeMm3: number; triangles: number; objects: number } | null>(null);
 	let submitting = $state(false);
 
@@ -42,8 +43,14 @@
 <svelte:head><title>New print · SparkPrint</title></svelte:head>
 
 <div class="mx-auto max-w-7xl">
-	<div class="mb-5 flex items-center justify-between">
+	<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
 		<div><h1 class="text-2xl font-semibold">New print</h1><p class="mt-1 text-sm text-soft-ink">Add your model, pick a color, and send it to the lab.</p></div>
+		{#if !form?.success}
+			<div class="inline-flex rounded-xl border border-warm-200 bg-surface p-1 text-sm shadow-xs">
+				<button type="button" onclick={() => (mode = 'design')} class="rounded-lg px-3 py-1.5 font-medium {mode === 'design' ? 'bg-spark-soft text-spark-deep' : 'text-muted-ink hover:text-ink'}">Design &amp; slice</button>
+				<button type="button" onclick={() => (mode = 'upload')} class="rounded-lg px-3 py-1.5 font-medium {mode === 'upload' ? 'bg-spark-soft text-spark-deep' : 'text-muted-ink hover:text-ink'}">Upload sliced file</button>
+			</div>
+		{/if}
 	</div>
 
 	{#if form?.success}
@@ -68,6 +75,7 @@
 	{:else}
 		{#if form?.error}<div class="mb-4 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-sm text-danger">{form.error}</div>{/if}
 
+		{#if mode === 'design'}
 		<form method="POST" action="?/submit" enctype="multipart/form-data"
 			use:enhance={({ formData, cancel }) => {
 				if (!canSubmit) { cancel(); return; }
@@ -155,5 +163,44 @@
 				</div>
 			</div>
 		</form>
+		{:else}
+		<!-- Upload a file already sliced in Bambu Studio / OrcaSlicer -->
+		<form method="POST" action="?/uploadSliced" enctype="multipart/form-data"
+			use:enhance={() => { submitting = true; return async ({ update }) => { await update(); submitting = false; }; }}
+			class="mx-auto grid max-w-2xl gap-4 card p-6">
+			<div>
+				<p class="text-sm text-soft-ink">Already sliced your plate in <b>Bambu Studio</b>? Export it (File → Export → <b>Export plate sliced file</b>, a <code>.gcode.3mf</code>) and drop it here — it prints as-is, no re-slicing.</p>
+			</div>
+			<div>
+				<label class="label" for="uf">Sliced file (.gcode.3mf)</label>
+				<input class="input" id="uf" name="file" type="file" accept=".3mf,.gcode.3mf" required />
+			</div>
+			<div class="grid gap-4 sm:grid-cols-2">
+				<div><label class="label" for="un">Name</label><input class="input" id="un" name="name" placeholder="My print" /></div>
+				<div><label class="label" for="ucp">Copies</label><input class="input" id="ucp" name="copies" type="number" min="1" max="20" value="1" /></div>
+			</div>
+			<div>
+				<div class="mb-2 flex items-center justify-between"><span class="label mb-0">Color to route to</span>{#if selected}<span class="text-xs text-muted-ink">{selected.colorName ?? selected.colorHex} · {selected.filamentType}</span>{/if}</div>
+				{#if data.colors.length === 0}<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
+				{:else}
+					<div class="flex flex-wrap gap-2">
+						{#each data.colors as c}
+							<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => (selected = c)}
+								class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+								{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<input type="hidden" name="colorHex" value={selected?.colorHex ?? '#FF5B14'} />
+			<input type="hidden" name="colorName" value={selected?.colorName ?? ''} />
+			<input type="hidden" name="filamentType" value={selected?.filamentType ?? 'PLA'} />
+			<button class="btn btn-primary w-full" disabled={submitting || !selected}>
+				{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> Send sliced file to print{/if}
+			</button>
+			{#if !selected}<p class="text-center text-xs text-muted-ink">Pick a color so we can route it to a printer that has it.</p>{/if}
+		</form>
+		{/if}
 	{/if}
 </div>

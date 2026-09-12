@@ -15,7 +15,7 @@ import { getEstimator, type SliceInput } from './slicer';
 import { canSubmit } from './quota';
 import { colorDistance } from '$lib/color';
 import { readBuffer, objectExists } from './storage';
-import { enqueueSlice } from './queue';
+import { enqueueSlice, enqueueDispatch } from './queue';
 import { lanPrint } from './bambu/lan';
 
 // ── Events / timeline ─────────────────────────────────────────────────────────
@@ -258,10 +258,16 @@ export type SubmitInput = {
 	copies: number;
 	printerModelTarget: string | null;
 	process?: Record<string, unknown>;
+	// Pre-sliced upload (Bambu Studio .gcode.3mf): storage key + parsed metrics. When set we skip
+	// slicing and dispatch the uploaded file straight to the printer.
+	preslicedKey?: string;
+	preslicedGrams?: number;
+	preslicedTimeSec?: number;
 };
 
 export async function submitJob(input: SubmitInput) {
 	const [org] = await db.select().from(orgs).where(eq(orgs.id, input.orgId)).limit(1);
+	const presliced = !!input.preslicedKey;
 
 	// Create as draft to run the estimate.
 	const [job] = await db
@@ -278,12 +284,13 @@ export async function submitJob(input: SubmitInput) {
 			supports: input.supports,
 			copies: input.copies,
 			printerModelTarget: input.printerModelTarget,
-			process: input.process ?? {}
+			process: input.process ?? {},
+			gcodeKey: input.preslicedKey ?? null
 		})
 		.returning();
 
-	// Instant geometry estimate — only to gate the quota before we spend a slice.
-	const est = await preEstimate(job);
+	// Pre-sliced: use the file's own metrics. Otherwise an instant geometry estimate to gate quota.
+	const est = presliced ? { grams: input.preslicedGrams ?? 0, timeSec: input.preslicedTimeSec ?? 0 } : await preEstimate(job);
 	const costPerKg = Number(org?.defaultCostPerKg ?? 25);
 	const cost = (est.grams / 1000) * costPerKg;
 
@@ -313,7 +320,12 @@ export async function submitJob(input: SubmitInput) {
 	}
 	// Assign the print to a printer right away and tell the student where it'll go.
 	const printerName = await assignPrinter(job.id);
-	await enqueueSlice(job.id).catch(() => {}); // real slice → cloud send, in the background
+	if (presliced) {
+		await db.update(printJobs).set({ status: 'ready', updatedAt: new Date() }).where(eq(printJobs.id, job.id));
+		await enqueueDispatch(job.id).catch(() => {}); // already sliced → straight to the printer
+	} else {
+		await enqueueSlice(job.id).catch(() => {}); // slice → LAN send, in the background
+	}
 	return { ok: true as const, jobId: job.id, status: 'queued' as const, estimate: est, printerName };
 }
 
