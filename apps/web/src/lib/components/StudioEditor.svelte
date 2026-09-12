@@ -14,8 +14,10 @@
 		plate = { x: 256, y: 256, z: 256 },
 		labColors = [],
 		defaultColor = null,
+		reference = false,
+		embedded = false,
 		onstats
-	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; onstats?: (s: Stats) => void } = $props();
+	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; onstats?: (s: Stats) => void } = $props();
 
 	const FALLBACK: LabColor = { colorHex, filamentType: 'PLA' };
 	function baseColor(): LabColor {
@@ -507,6 +509,50 @@
 		scene.add(plateGroup);
 	}
 
+	// ── Scale-reference objects: a real pencil (~175 mm) and paperclip (~30 mm) beside the plate,
+	// so a model's size is instantly readable against everyday objects.
+	let refGroup: any = null;
+	function buildReference() {
+		const g = new THREE.Group();
+		const R = 4; // pencil body radius (≈ 8 mm across)
+
+		// Pencil — hex body + wood cone + graphite tip + eraser, lying along Z.
+		const pencil = new THREE.Group();
+		const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 150, 6), new THREE.MeshStandardMaterial({ color: 0xf2b01e, roughness: 0.55 }));
+		body.rotation.x = Math.PI / 2;
+		const wood = new THREE.Mesh(new THREE.ConeGeometry(R, 18, 6), new THREE.MeshStandardMaterial({ color: 0xe8d3ad, roughness: 0.7 }));
+		wood.rotation.x = -Math.PI / 2; wood.position.z = 84;
+		const lead = new THREE.Mesh(new THREE.ConeGeometry(1.3, 5, 6), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.5 }));
+		lead.rotation.x = -Math.PI / 2; lead.position.z = 95.5;
+		const band = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.3, R + 0.3, 10, 6), new THREE.MeshStandardMaterial({ color: 0xc0c6cc, metalness: 0.7, roughness: 0.35 }));
+		band.rotation.x = Math.PI / 2; band.position.z = -80;
+		const eraser = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 9, 6), new THREE.MeshStandardMaterial({ color: 0xe58b8b, roughness: 0.8 }));
+		eraser.rotation.x = Math.PI / 2; eraser.position.z = -89.5;
+		pencil.add(body, wood, lead, band, eraser);
+		for (const c of pencil.children) c.castShadow = true;
+		pencil.position.set(plate.x / 2 + 24, R, -10);
+		g.add(pencil);
+
+		// Paperclip — steel wire bent into the classic double loop, resting flat.
+		const clip2d = [
+			[0, 3.6], [24, 3.6], [28, 0], [24, -3.6], [4, -3.6], [0, 0],
+			[4, 1.9], [20, 1.9], [22.5, 0], [20, -1.9], [8, -1.9]
+		];
+		const curve = new THREE.CatmullRomCurve3(clip2d.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'catmullrom', 0.4);
+		const clip = new THREE.Mesh(new THREE.TubeGeometry(curve, 120, 0.6, 10, false), new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 0.85, roughness: 0.3 }));
+		clip.castShadow = true;
+		clip.position.set(plate.x / 2 + 20, 0.7, 40);
+		g.add(clip);
+
+		return g;
+	}
+	function setReference(on: boolean) {
+		if (!THREE || !scene) return;
+		if (!on) { if (refGroup) { scene.remove(refGroup); refGroup = null; } return; }
+		if (!refGroup) { refGroup = buildReference(); scene.add(refGroup); }
+	}
+	$effect(() => { const on = reference; if (THREE && scene) setReference(on); });
+
 	function applyMode(m: 'translate' | 'rotate' | 'scale' | 'paint') {
 		mode = m;
 		if (m === 'paint') { gizmo?.detach?.(); return; } // painting uses raycast clicks, not gizmo
@@ -705,6 +751,7 @@
 			const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(120, 240, 150); key.castShadow = true;
 			key.shadow.mapSize.set(2048, 2048); key.shadow.camera.near = 1; key.shadow.camera.far = 1600; scene.add(key);
 			buildPlate();
+			setReference(reference);
 
 			gizmo = new TransformControls(camera, renderer.domElement);
 			gizmo.setMode(mode);
@@ -764,13 +811,15 @@
 	] as const;
 </script>
 
-<div class="{fullscreen ? 'fixed inset-0 z-[60]' : 'relative h-full w-full rounded-xl border border-warm-200'} overflow-hidden bg-soft-paper" bind:this={container}>
-	<button type="button" title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'} onclick={() => (fullscreen = !fullscreen)} class="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-warm-200 bg-surface/95 text-soft-ink shadow-lg backdrop-blur hover:bg-warm-100">
-		<Icon name={fullscreen ? 'minimize' : 'maximize'} size={17} />
-	</button>
-	<div class="pointer-events-none absolute left-3 top-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[11px] font-medium text-soft-ink backdrop-blur">
-		{plate.x} × {plate.y} × {plate.z} mm{#if objects.length} · {objects.length} object{objects.length === 1 ? '' : 's'}{/if}
-	</div>
+<div class="{embedded ? 'h-full w-full' : fullscreen ? 'fixed inset-0 z-[60]' : 'relative h-full w-full rounded-xl border border-warm-200'} overflow-hidden bg-soft-paper" class:relative={embedded} bind:this={container}>
+	{#if !embedded}
+		<button type="button" title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'} onclick={() => (fullscreen = !fullscreen)} class="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-warm-200 bg-surface/95 text-soft-ink shadow-lg backdrop-blur hover:bg-warm-100">
+			<Icon name={fullscreen ? 'minimize' : 'maximize'} size={17} />
+		</button>
+		<div class="pointer-events-none absolute left-3 top-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[11px] font-medium text-soft-ink backdrop-blur">
+			{plate.x} × {plate.y} × {plate.z} mm{#if objects.length} · {objects.length} object{objects.length === 1 ? '' : 's'}{/if}
+		</div>
+	{/if}
 
 	<!-- Paint palette (color / support / seam brushes) -->
 	{#if mode === 'paint' && objects.length}
