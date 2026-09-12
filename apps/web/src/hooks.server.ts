@@ -25,15 +25,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	const path = event.url.pathname;
 
-	// First-run: until a lab exists, funnel everything into the setup wizard.
-	if (path !== '/healthz') {
-		const initialized = await isInitialized();
-		if (!initialized && !path.startsWith('/setup')) {
-			throw redirect(303, '/setup');
-		}
-		// Once initialized, only an owner (mid-wizard or re-running) may stay in /setup.
-		if (initialized && path.startsWith('/setup') && (!user || user.role !== 'owner')) {
-			throw redirect(303, user ? '/app' : '/login');
+	// First-run: until a lab exists, funnel everything into sign-up (the first user creates it).
+	if (path !== '/healthz' && !path.startsWith('/signup')) {
+		if (!(await isInitialized())) {
+			throw redirect(303, '/signup');
 		}
 	}
 
