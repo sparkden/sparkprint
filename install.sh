@@ -6,7 +6,7 @@
 #  SparkPrint "print server" appliance:
 #    • connects Wi-Fi (if not already online)
 #    • installs Node, OrcaSlicer (headless), and all system deps
-#    • sets up PostgreSQL (local) or uses a database URL you provide
+#    • stores data in a local SQLite file (nothing to configure)
 #    • builds the app and runs it on boot via systemd
 #    • (optional) publishes it on YOUR domain via a Cloudflare Tunnel — no
 #      port-forwarding, no firewall changes, works behind school networks
@@ -70,7 +70,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Build tools, headless-GL libs for OrcaSlicer, fonts, and git/curl.
 apt-get install -y -qq \
-  ca-certificates curl git build-essential xvfb ffmpeg \
+  ca-certificates curl git build-essential python3 xvfb ffmpeg \
   libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
   libwebkit2gtk-4.1-0 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
   || apt-get install -y -qq ca-certificates curl git build-essential xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
@@ -103,26 +103,10 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # ── 4. Database ──────────────────────────────────────────────────────────────────
 step "4/9  Database"
+# Local SQLite file — nothing to install or configure.
 ENV_FILE="$APP_DIR/apps/web/.env"
-EXISTING_DB=""; [ -f "$ENV_FILE" ] && EXISTING_DB="$(grep -oP '(?<=^DATABASE_URL=").*(?=")' "$ENV_FILE" 2>/dev/null || true)"
-if [ -n "$EXISTING_DB" ] && askyn "Keep the existing database URL?"; then
-  DATABASE_URL="$EXISTING_DB"; ok "Keeping existing database."
-elif askyn "Install a local PostgreSQL on this Pi? (recommended for a standalone box)"; then
-  apt-get install -y -qq postgresql >/dev/null
-  systemctl enable --now postgresql >/dev/null 2>&1 || true
-  DBPASS="$(openssl rand -hex 16)"
-  sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='sparkprint'" | grep -q 1 \
-    || sudo -u postgres psql -q -c "CREATE USER sparkprint WITH PASSWORD '$DBPASS';"
-  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='sparkprint'" | grep -q 1 \
-    || sudo -u postgres psql -q -c "CREATE DATABASE sparkprint OWNER sparkprint;"
-  # If the role already existed, reset the password so our URL is valid.
-  sudo -u postgres psql -q -c "ALTER USER sparkprint WITH PASSWORD '$DBPASS';"
-  DATABASE_URL="postgresql://sparkprint:${DBPASS}@localhost:5432/sparkprint"
-  ok "Local PostgreSQL ready."
-else
-  DATABASE_URL="$(ask 'Paste your PostgreSQL connection URL')"
-  [ -n "$DATABASE_URL" ] || die "A database URL is required."
-fi
+DATABASE_URL="./.data/sparkprint.db"
+ok "Using a local SQLite database ($APP_DIR/apps/web/.data/sparkprint.db)."
 
 # ── 5. OrcaSlicer (headless slicing) ─────────────────────────────────────────────
 step "5/9  OrcaSlicer (slicing engine)"
@@ -160,7 +144,6 @@ cat > "$ENV_FILE" <<EOF
 DATABASE_URL="$DATABASE_URL"
 APP_SECRET="$APP_SECRET"
 STORAGE_DIR="./.data/storage"
-BAMBU_MODE="cloud"
 NODE_ENV="production"
 PORT="$APP_PORT"
 HOST="0.0.0.0"
@@ -184,7 +167,7 @@ step "8/9  System service"
 cat > /etc/systemd/system/sparkprint.service <<EOF
 [Unit]
 Description=SparkPrint server
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

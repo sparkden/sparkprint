@@ -1,33 +1,12 @@
 {
   "version": "7",
-  "dialect": "postgresql",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "version": "7",
-      "when": 1789003367150,
-      "tag": "0000_curvy_forgotten_one",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1789011805310,
-      "tag": "0001_omniscient_blackheart",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1789054577422,
-      "tag": "0002_clear_matthew_murdock",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1789071566292,
-      "tag": "0003_nostalgic_changeling",
+      "version": "6",
+      "when": 1789151880860,
+      "tag": "0000_panoramic_grandmaster",
       "breakpoints": true
     }
   ]

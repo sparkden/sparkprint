@@ -1,21 +1,23 @@
-// Applies generated SQL migrations from ./drizzle to the database.
-// In dev we load apps/web/.env via dotenv (optional); in prod the container injects env.
+// Applies generated SQL migrations from ./drizzle to the local SQLite database.
 try {
 	await import('dotenv/config');
 } catch {
-	/* dotenv is a dev dependency; in production env comes from the environment */
+	/* dotenv is a dev dependency */
 }
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error('DATABASE_URL is not set');
+const file = resolve((process.env.DATABASE_URL || './.data/sparkprint.db').replace(/^file:/, ''));
+mkdirSync(dirname(file), { recursive: true });
 
-const client = postgres(url, { max: 1 });
-const db = drizzle(client);
+const sqlite = new Database(file);
+sqlite.pragma('journal_mode = WAL');
+const db = drizzle(sqlite);
 
 console.log('Applying migrations…');
-await migrate(db, { migrationsFolder: './drizzle' });
+migrate(db, { migrationsFolder: './drizzle' });
 console.log('✔ Migrations applied.');
-await client.end();
+sqlite.close();

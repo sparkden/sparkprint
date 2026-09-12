@@ -30,25 +30,19 @@ server on that VLAN or open the ports above between them.
 
 ## 2. Run SparkPrint on-site
 
-On the on-site machine (Docker is easiest — see `DEPLOY.md` for the full compose file):
+Easiest is the one-shot installer on a Raspberry Pi 5 — see [`PI-SETUP.md`](./PI-SETUP.md). It
+installs everything, stores data in a local SQLite file, and runs SparkPrint on boot.
+
+From source on any Linux box on the printers' network:
 
 ```bash
-# with Docker
-docker run -d --name sparkprint \
-  -e DATABASE_URL="postgres://…" \
-  -e APP_SECRET="<a long random string>" \
-  -p 3000:3000 \
-  ghcr.io/sparkden/sparkprint:latest
-
-# or from source
-npm install && npm run build -w @sparkprint/web
-node apps/web/build            # serves on :3000
+npm install
+npm run build -w @sparkprint/web
+node apps/web/build            # serves on :3000 (uses a local SQLite file)
 ```
 
-Use **host networking** (or a macvlan) if Docker's default bridge blocks multicast discovery:
-`docker run --network host …`. Manual IP entry (below) works without host networking.
-
-Open `http://<server-ip>:3000` from a school computer and finish the first-run admin setup.
+Open `http://<server-ip>:3000` from a school computer and finish the first-run admin setup
+(the first person to sign up owns the lab).
 
 ---
 

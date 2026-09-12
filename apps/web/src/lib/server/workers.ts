@@ -6,12 +6,11 @@
  *                  slicer is configured, so the queue never gets stuck.
  *   - `dispatch` → uploads the sliced file to the printer over the LAN (FTPS) and starts it
  *                  (MQTT project_file), the way Bambu Studio's LAN mode does.
- * A separate services/slicer container can also subscribe to `slice` to scale out; pg-boss
- * hands each job to exactly one worker.
+ * Backed by the in-process queue (queue.ts); on restart, recoverJobs() re-enqueues in-flight work.
  */
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { readFile } from 'node:fs/promises';
-import { getBoss, SLICE_QUEUE, DISPATCH_QUEUE, enqueueDispatch, jobsOf } from './queue';
+import { onSlice, onDispatch, enqueueSlice, enqueueDispatch } from './queue';
 import { dispatch, logEvent } from './jobs';
 import { db } from './db';
 import { printJobs, models, printers } from './db/schema';
@@ -74,21 +73,23 @@ async function sliceJob(jobId: string) {
 	await enqueueDispatch(jobId); // send it to the printer over the local network
 }
 
+/** Re-enqueue work that was in flight when the server last stopped. */
+async function recoverJobs() {
+	// Jobs assigned + sliced but not yet on a printer → dispatch again.
+	const ready = await db.select({ id: printJobs.id }).from(printJobs).where(inArray(printJobs.status, ['ready', 'sending']));
+	for (const j of ready) enqueueDispatch(j.id);
+	// Jobs approved/queued that still need slicing (have a model, no gcode yet) → slice again.
+	const queued = await db.select({ id: printJobs.id, gcodeKey: printJobs.gcodeKey }).from(printJobs).where(inArray(printJobs.status, ['queued', 'slicing']));
+	for (const j of queued) if (!j.gcodeKey) enqueueSlice(j.id);
+}
+
 export async function startWorkers() {
 	if (g.__sparkWorkers) return;
 	g.__sparkWorkers = true;
-	const boss = await getBoss();
 
-	await boss.work(SLICE_QUEUE, { batchSize: 1 }, async (jobs: unknown) => {
-		for (const d of jobsOf<{ jobId: string }>(jobs)) {
-			try { await sliceJob(d.jobId); } catch (e) { console.error('[slice] failed', (e as Error).message); }
-		}
-	});
-	await boss.work(DISPATCH_QUEUE, { batchSize: 1 }, async (jobs: unknown) => {
-		for (const d of jobsOf<{ jobId: string }>(jobs)) {
-			try { await dispatch(d.jobId); } catch (e) { console.error('[dispatch] failed', (e as Error).message); }
-		}
-	});
+	onSlice(sliceJob);
+	onDispatch(dispatch);
+	recoverJobs().catch((e) => console.error('[queue] recover', (e as Error).message));
 
 	// Warm up: prefer OrcaSlicer; only install the bundled Slic3r if Orca isn't present.
 	orcaAvailable().then((o) => {

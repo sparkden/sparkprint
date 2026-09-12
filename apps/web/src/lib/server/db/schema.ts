@@ -1,15 +1,4 @@
-import {
-	pgTable,
-	pgEnum,
-	text,
-	integer,
-	boolean,
-	timestamp,
-	numeric,
-	jsonb,
-	uniqueIndex,
-	index
-} from 'drizzle-orm/pg-core';
+import { sqliteTable, text, integer, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 
@@ -19,66 +8,62 @@ const id = (prefix: string) =>
 		.primaryKey()
 		.$defaultFn(() => `${prefix}_${nanoid(18)}`);
 
-const createdAt = timestamp('created_at', { withTimezone: true }).defaultNow().notNull();
-const updatedAt = timestamp('updated_at', { withTimezone: true }).defaultNow().notNull();
+const createdAt = integer('created_at', { mode: 'timestamp' })
+	.notNull()
+	.$defaultFn(() => new Date());
+const updatedAt = integer('updated_at', { mode: 'timestamp' })
+	.notNull()
+	.$defaultFn(() => new Date());
 
-// ── Enums ───────────────────────────────────────────────────────────────────
-export const roleEnum = pgEnum('role', ['owner', 'admin', 'teacher', 'student']);
-export const userStatusEnum = pgEnum('user_status', ['active', 'invited', 'suspended']);
-export const printerStatusEnum = pgEnum('printer_status', [
-	'offline',
-	'idle',
-	'printing',
-	'paused',
-	'error',
-	'finished'
-]);
-export const jobStatusEnum = pgEnum('job_status', [
-	'draft', // being designed, not submitted
-	'pending_approval', // waiting on admin/teacher sign-off
-	'rejected', // approval denied
-	'queued', // approved / no-approval-needed, waiting for a printer
-	'slicing', // slicer worker processing
+// Helpers to match the old Postgres semantics on SQLite.
+const bool = (name: string) => integer(name, { mode: 'boolean' });
+const ts = (name: string) => integer(name, { mode: 'timestamp' });
+const num = (name: string) => text(name); // decimals kept as strings, as postgres numeric was
+
+// ── Enum value sets (stored as CHECKed text on SQLite) ──────────────────────────
+export const ROLE_VALUES = ['owner', 'admin', 'teacher', 'student'] as const;
+export const USER_STATUS_VALUES = ['active', 'invited', 'suspended'] as const;
+export const PRINTER_STATUS_VALUES = ['offline', 'idle', 'printing', 'paused', 'error', 'finished'] as const;
+export const JOB_STATUS_VALUES = [
+	'draft',
+	'pending_approval',
+	'rejected',
+	'queued',
+	'slicing',
 	'slice_failed',
-	'ready', // sliced, awaiting dispatch to a printer
-	'sending', // uploading to printer
+	'ready',
+	'sending',
 	'printing',
 	'paused',
 	'completed',
 	'failed',
 	'canceled'
-]);
+] as const;
 
-// ── Organizations (schools) ───────────────────────────────────────────────────
-// Global key/value app settings (not org-scoped). Currently: the public base URL the Bambu
-// printer downloads sliced files from (auto-learned from the browser, or set via env).
-export const appSettings = pgTable('app_settings', {
+// Global key/value app settings (not org-scoped).
+export const appSettings = sqliteTable('app_settings', {
 	key: text('key').primaryKey(),
 	value: text('value').notNull(),
 	updatedAt
 });
 
-export const orgs = pgTable('orgs', {
+// ── Organizations (the single school/lab) ─────────────────────────────────────
+export const orgs = sqliteTable('orgs', {
 	id: id('org'),
 	name: text('name').notNull(),
 	slug: text('slug').notNull().unique(),
-	// Org-wide policy & feature flags
-	queueEnabled: boolean('queue_enabled').notNull().default(true),
-	approvalMode: boolean('approval_mode').notNull().default(false),
-	// Defaults applied to new members (grams/month, jobs/month; null = unlimited)
+	queueEnabled: bool('queue_enabled').notNull().default(true),
+	approvalMode: bool('approval_mode').notNull().default(false),
 	defaultMonthlyGramLimit: integer('default_monthly_gram_limit'),
 	defaultMonthlyJobLimit: integer('default_monthly_job_limit'),
-	// Estimated material cost used for accounting ($/kg), overridable per filament
-	defaultCostPerKg: numeric('default_cost_per_kg', { precision: 8, scale: 2 })
-		.notNull()
-		.default('25.00'),
-	settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+	defaultCostPerKg: num('default_cost_per_kg').notNull().default('25.00'),
+	settings: text('settings', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
 	createdAt,
 	updatedAt
 });
 
 // ── Users ─────────────────────────────────────────────────────────────────────
-export const users = pgTable(
+export const users = sqliteTable(
 	'users',
 	{
 		id: id('usr'),
@@ -87,13 +72,12 @@ export const users = pgTable(
 			.references(() => orgs.id, { onDelete: 'cascade' }),
 		email: text('email').notNull(),
 		name: text('name').notNull(),
-		passwordHash: text('password_hash'), // null until an invited user sets a password
-		role: roleEnum('role').notNull().default('student'),
-		status: userStatusEnum('status').notNull().default('active'),
-		// Per-user quota overrides (null = inherit org default; 0 = blocked)
+		passwordHash: text('password_hash'),
+		role: text('role', { enum: ROLE_VALUES }).notNull().default('student'),
+		status: text('status', { enum: USER_STATUS_VALUES }).notNull().default('active'),
 		monthlyGramLimit: integer('monthly_gram_limit'),
 		monthlyJobLimit: integer('monthly_job_limit'),
-		lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+		lastLoginAt: ts('last_login_at'),
 		createdAt,
 		updatedAt
 	},
@@ -101,108 +85,87 @@ export const users = pgTable(
 );
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
-export const sessions = pgTable('sessions', {
-	id: text('id').primaryKey(), // opaque random token (stored hashed in prod; raw here for dev)
+export const sessions = sqliteTable('sessions', {
+	id: text('id').primaryKey(), // opaque token, stored hashed
 	userId: text('user_id')
 		.notNull()
 		.references(() => users.id, { onDelete: 'cascade' }),
-	expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+	expiresAt: ts('expires_at').notNull(),
 	createdAt
 });
 
 // ── Invites ───────────────────────────────────────────────────────────────────
-export const invites = pgTable('invites', {
+export const invites = sqliteTable('invites', {
 	id: id('inv'),
 	orgId: text('org_id')
 		.notNull()
 		.references(() => orgs.id, { onDelete: 'cascade' }),
 	token: text('token').notNull().unique(),
-	role: roleEnum('role').notNull().default('student'),
-	email: text('email'), // optional lock to a specific email
-	// Quota presets applied to users who redeem this invite
+	role: text('role', { enum: ROLE_VALUES }).notNull().default('student'),
+	email: text('email'),
 	monthlyGramLimit: integer('monthly_gram_limit'),
 	monthlyJobLimit: integer('monthly_job_limit'),
-	maxUses: integer('max_uses'), // null = unlimited
+	maxUses: integer('max_uses'),
 	uses: integer('uses').notNull().default(0),
-	expiresAt: timestamp('expires_at', { withTimezone: true }),
+	expiresAt: ts('expires_at'),
 	createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
 	createdAt
 });
 
-// ── Bambu account binding (school connects one Bambu Lab account) ──────────────
-export const bambuAccounts = pgTable('bambu_accounts', {
-	id: id('bam'),
-	orgId: text('org_id')
-		.notNull()
-		.references(() => orgs.id, { onDelete: 'cascade' }),
-	email: text('email').notNull(),
-	region: text('region').notNull().default('us'), // us | eu | cn
-	bambuUserId: text('bambu_user_id'),
-	accessToken: text('access_token'),
-	refreshToken: text('refresh_token'),
-	tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
-	status: text('status').notNull().default('connected'), // connected | expired | error
-	lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
-	createdAt,
-	updatedAt
-});
-
 // ── Printers ──────────────────────────────────────────────────────────────────
-export const printers = pgTable(
+export const printers = sqliteTable(
 	'printers',
 	{
 		id: id('prn'),
 		orgId: text('org_id')
 			.notNull()
 			.references(() => orgs.id, { onDelete: 'cascade' }),
-		bambuAccountId: text('bambu_account_id').references(() => bambuAccounts.id, {
-			onDelete: 'set null'
-		}),
+		bambuAccountId: text('bambu_account_id'), // legacy; unused (LAN-only)
 		devId: text('dev_id').notNull(), // Bambu device serial
 		name: text('name').notNull(),
-		model: text('model').notNull().default('X1C'), // X1C | P1S | P1P | A1 | A1M ...
-		accessCode: text('access_code'), // for LAN mode
+		model: text('model').notNull().default('X1C'),
+		accessCode: text('access_code'), // LAN access code
 		ipAddress: text('ip_address'),
 		location: text('location'),
-		status: printerStatusEnum('status').notNull().default('offline'),
-		online: boolean('online').notNull().default(false),
-		enabled: boolean('enabled').notNull().default(true), // admin can take a printer out of the pool
-		priority: integer('priority').notNull().default(0), // higher = picked first when dispatching
-		nozzleDiameter: numeric('nozzle_diameter', { precision: 3, scale: 2 }).notNull().default('0.40'),
-		hasAms: boolean('has_ams').notNull().default(false),
+		status: text('status', { enum: PRINTER_STATUS_VALUES }).notNull().default('offline'),
+		online: bool('online').notNull().default(false),
+		enabled: bool('enabled').notNull().default(true),
+		priority: integer('priority').notNull().default(0),
+		nozzleDiameter: num('nozzle_diameter').notNull().default('0.40'),
+		hasAms: bool('has_ams').notNull().default(false),
 		// live telemetry snapshot
 		currentJobId: text('current_job_id'),
 		progressPct: integer('progress_pct'),
-		nozzleTemp: numeric('nozzle_temp', { precision: 5, scale: 1 }),
-		bedTemp: numeric('bed_temp', { precision: 5, scale: 1 }),
+		nozzleTemp: num('nozzle_temp'),
+		bedTemp: num('bed_temp'),
 		remainingTimeMin: integer('remaining_time_min'),
-		lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
-		capabilities: jsonb('capabilities').$type<Record<string, unknown>>().notNull().default({}),
+		lastSeenAt: ts('last_seen_at'),
+		capabilities: text('capabilities', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
 		createdAt,
 		updatedAt
 	},
 	(t) => [uniqueIndex('printers_org_dev_idx').on(t.orgId, t.devId)]
 );
 
-// ── AMS units (one printer can have multiple AMS) ──────────────────────────────
-export const amsUnits = pgTable(
+// ── AMS units ──────────────────────────────────────────────────────────────────
+export const amsUnits = sqliteTable(
 	'ams_units',
 	{
 		id: id('ams'),
 		printerId: text('printer_id')
 			.notNull()
 			.references(() => printers.id, { onDelete: 'cascade' }),
-		amsIndex: integer('ams_index').notNull(), // 0-based
+		amsIndex: integer('ams_index').notNull(),
 		humidity: integer('humidity'),
-		temperature: numeric('temperature', { precision: 5, scale: 1 }),
+		temperature: num('temperature'),
 		createdAt,
 		updatedAt
 	},
 	(t) => [uniqueIndex('ams_printer_index_idx').on(t.printerId, t.amsIndex)]
 );
 
-// ── AMS slots / trays (the mapped colors) ──────────────────────────────────────
-export const amsSlots = pgTable(
+// ── AMS slots / trays ──────────────────────────────────────────────────────────
+export const amsSlots = sqliteTable(
 	'ams_slots',
 	{
 		id: id('slot'),
@@ -212,23 +175,23 @@ export const amsSlots = pgTable(
 		printerId: text('printer_id')
 			.notNull()
 			.references(() => printers.id, { onDelete: 'cascade' }),
-		slotIndex: integer('slot_index').notNull(), // 0-3 within the AMS
-		filamentType: text('filament_type'), // PLA | PETG | ABS | TPU ...
+		slotIndex: integer('slot_index').notNull(),
+		filamentType: text('filament_type'),
 		filamentBrand: text('filament_brand'),
-		colorHex: text('color_hex'), // #RRGGBB(AA)
+		colorHex: text('color_hex'),
 		colorName: text('color_name'),
-		trayUuid: text('tray_uuid'), // Bambu RFID tray identifier
-		remainingPct: integer('remaining_pct'), // estimated remaining %
+		trayUuid: text('tray_uuid'),
+		remainingPct: integer('remaining_pct'),
 		nominalWeightG: integer('nominal_weight_g'),
-		empty: boolean('empty').notNull().default(false),
+		empty: bool('empty').notNull().default(false),
 		createdAt,
 		updatedAt
 	},
 	(t) => [uniqueIndex('ams_slot_idx').on(t.amsUnitId, t.slotIndex)]
 );
 
-// ── Filament inventory / catalog (org-level, for cost & stock tracking) ─────────
-export const filaments = pgTable('filaments', {
+// ── Filament inventory / catalog ────────────────────────────────────────────────
+export const filaments = sqliteTable('filaments', {
 	id: id('fil'),
 	orgId: text('org_id')
 		.notNull()
@@ -237,17 +200,17 @@ export const filaments = pgTable('filaments', {
 	type: text('type').notNull().default('PLA'),
 	brand: text('brand').notNull().default('Bambu'),
 	colorHex: text('color_hex').notNull().default('#FF5B14'),
-	costPerKg: numeric('cost_per_kg', { precision: 8, scale: 2 }),
-	gramsInStock: integer('grams_in_stock'), // null = not tracked
+	costPerKg: num('cost_per_kg'),
+	gramsInStock: integer('grams_in_stock'),
 	gramsUsed: integer('grams_used').notNull().default(0),
 	lowStockThresholdG: integer('low_stock_threshold_g'),
-	archived: boolean('archived').notNull().default(false),
+	archived: bool('archived').notNull().default(false),
 	createdAt,
 	updatedAt
 });
 
 // ── Models (uploaded / imported designs) ───────────────────────────────────────
-export const models = pgTable('models', {
+export const models = sqliteTable('models', {
 	id: id('mdl'),
 	orgId: text('org_id')
 		.notNull()
@@ -256,18 +219,17 @@ export const models = pgTable('models', {
 		.notNull()
 		.references(() => users.id, { onDelete: 'cascade' }),
 	name: text('name').notNull(),
-	format: text('format').notNull().default('stl'), // stl | 3mf | obj | step
-	fileKey: text('file_key').notNull(), // storage key
+	format: text('format').notNull().default('stl'),
+	fileKey: text('file_key').notNull(),
 	thumbnailKey: text('thumbnail_key'),
 	sizeBytes: integer('size_bytes'),
-	// bounding box in mm, triangle count etc.
-	meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default({}),
+	meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
 	createdAt,
 	updatedAt
 });
 
 // ── Print jobs ─────────────────────────────────────────────────────────────────
-export const printJobs = pgTable(
+export const printJobs = sqliteTable(
 	'print_jobs',
 	{
 		id: id('job'),
@@ -280,33 +242,26 @@ export const printJobs = pgTable(
 		modelId: text('model_id').references(() => models.id, { onDelete: 'set null' }),
 		printerId: text('printer_id').references(() => printers.id, { onDelete: 'set null' }),
 		name: text('name').notNull(),
-		status: jobStatusEnum('status').notNull().default('draft'),
-		priority: integer('priority').notNull().default(0), // higher = sooner
-		// Slicing settings chosen by the student
-		printerModelTarget: text('printer_model_target'), // e.g. "X1C" — restrict to compatible printers
-		layerHeightMm: numeric('layer_height_mm', { precision: 4, scale: 2 }).default('0.20'),
+		status: text('status', { enum: JOB_STATUS_VALUES }).notNull().default('draft'),
+		priority: integer('priority').notNull().default(0),
+		printerModelTarget: text('printer_model_target'),
+		layerHeightMm: num('layer_height_mm').default('0.20'),
 		infillPct: integer('infill_pct').default(15),
-		supports: boolean('supports').notNull().default(false),
+		supports: bool('supports').notNull().default(false),
 		copies: integer('copies').notNull().default(1),
-		// Full slicing/process settings (walls, pattern, supports type, brim, seam, …)
-		process: jsonb('process').$type<Record<string, unknown>>().notNull().default({}),
-		// Requested color(s): array of { filamentType, colorHex, colorName }
-		colorRequest: jsonb('color_request').$type<ColorRequest[]>().notNull().default([]),
-		// Resolved AMS slot mapping once assigned to a printer: [{ extruder/filamentIdx -> amsSlotId }]
-		colorMapping: jsonb('color_mapping').$type<ColorMapping[]>().notNull().default([]),
-		// Slice results
-		estimatedGrams: numeric('estimated_grams', { precision: 8, scale: 2 }),
+		process: text('process', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
+		colorRequest: text('color_request', { mode: 'json' }).$type<ColorRequest[]>().notNull().$defaultFn(() => []),
+		colorMapping: text('color_mapping', { mode: 'json' }).$type<ColorMapping[]>().notNull().$defaultFn(() => []),
+		estimatedGrams: num('estimated_grams'),
 		estimatedTimeSec: integer('estimated_time_sec'),
-		actualGrams: numeric('actual_grams', { precision: 8, scale: 2 }),
-		gcodeKey: text('gcode_key'), // sliced 3mf/gcode storage key
-		estimatedCost: numeric('estimated_cost', { precision: 8, scale: 2 }),
-		// Approval workflow
+		actualGrams: num('actual_grams'),
+		gcodeKey: text('gcode_key'),
+		estimatedCost: num('estimated_cost'),
 		approvedBy: text('approved_by').references(() => users.id, { onDelete: 'set null' }),
 		approvalNote: text('approval_note'),
-		// Lifecycle timestamps
-		submittedAt: timestamp('submitted_at', { withTimezone: true }),
-		startedAt: timestamp('started_at', { withTimezone: true }),
-		finishedAt: timestamp('finished_at', { withTimezone: true }),
+		submittedAt: ts('submitted_at'),
+		startedAt: ts('started_at'),
+		finishedAt: ts('finished_at'),
 		failureReason: text('failure_reason'),
 		createdAt,
 		updatedAt
@@ -319,16 +274,16 @@ export const printJobs = pgTable(
 );
 
 // ── Job events (audit trail / timeline) ────────────────────────────────────────
-export const jobEvents = pgTable(
+export const jobEvents = sqliteTable(
 	'job_events',
 	{
 		id: id('evt'),
 		jobId: text('job_id')
 			.notNull()
 			.references(() => printJobs.id, { onDelete: 'cascade' }),
-		type: text('type').notNull(), // status_change | approval | slice | dispatch | error | note
+		type: text('type').notNull(),
 		message: text('message'),
-		data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+		data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
 		actorId: text('actor_id').references(() => users.id, { onDelete: 'set null' }),
 		createdAt
 	},
@@ -342,7 +297,7 @@ export type ColorRequest = {
 	colorName?: string;
 };
 export type ColorMapping = {
-	filamentIndex: number; // paint/extruder index in the model
+	filamentIndex: number;
 	amsSlotId: string;
 	amsIndex: number;
 	slotIndex: number;
@@ -364,10 +319,6 @@ export const userRelations = relations(users, ({ one, many }) => ({
 }));
 export const printerRelations = relations(printers, ({ one, many }) => ({
 	org: one(orgs, { fields: [printers.orgId], references: [orgs.id] }),
-	bambuAccount: one(bambuAccounts, {
-		fields: [printers.bambuAccountId],
-		references: [bambuAccounts.id]
-	}),
 	amsUnits: many(amsUnits)
 }));
 export const amsUnitRelations = relations(amsUnits, ({ one, many }) => ({
@@ -396,5 +347,5 @@ export type Filament = typeof filaments.$inferSelect;
 export type Model = typeof models.$inferSelect;
 export type PrintJob = typeof printJobs.$inferSelect;
 export type JobEvent = typeof jobEvents.$inferSelect;
-export type Role = (typeof roleEnum.enumValues)[number];
-export type JobStatus = (typeof jobStatusEnum.enumValues)[number];
+export type Role = (typeof ROLE_VALUES)[number];
+export type JobStatus = (typeof JOB_STATUS_VALUES)[number];

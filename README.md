@@ -7,8 +7,8 @@ invite students, set per-student quotas, and optionally gate every print behind 
 so a whole lab runs without sharing a single Bambu login.
 
 Built with **SvelteKit 2 + Svelte 5**, **Tailwind v4** (Sparkden design system),
-**PostgreSQL + Drizzle**, with a Three.js design studio and worker services for slicing
-and Bambu connectivity.
+**SQLite + Drizzle**, with a Three.js design studio, in-process slicing (OrcaSlicer), and
+LAN printing to Bambu Lab printers. Fully self-hosted — no cloud, one school per install.
 
 ## Monorepo layout
 
@@ -32,27 +32,22 @@ npm run dev                 # web app on http://localhost:5173
 
 Config lives in `apps/web/.env` (`DATABASE_URL`, `STORAGE_DIR`, `APP_SECRET`).
 
-1. **Sign up** → creates your lab; you're the owner.
-2. **Connect Bambu** (Printers page) → imports printers + AMS. *(Uses a mock provider
-   until the bridge/cloud API is wired — see below. You can also add printers manually.)*
-3. **Map colors** on each printer's AMS slots.
+1. **Sign up** → the first user creates the lab and is the owner.
+2. **Add printers** (Printers page) → **Discover on network** (SSDP) or add by hand, then set
+   each printer's local IP + LAN access code.
+3. **Map colors** on each printer's AMS slots (they also auto-populate from live telemetry).
 4. **Invite** students with a link; set quotas; toggle queue / approval in Settings.
 5. Students **design & print**; jobs auto-route to a compatible printer.
 
 ## How "real" is it?
 
-Everything in the platform (orgs, roles, invites, printers, AMS color mapping, quotas,
-queue, approvals, usage/cost tracking, the 3D design studio, job lifecycle) is fully
-implemented and runs against Postgres today. Two integrations are abstracted behind
-adapters with working mocks so the product is usable before hardware/binaries are present:
+Everything (roles, invites, printers, AMS color mapping, quotas, queue, approvals, usage/cost
+tracking, the 3D design studio, job lifecycle) is implemented and runs on a local **SQLite**
+file. Printing is **LAN-only**: real slicing in-process (OrcaSlicer), then FTPS upload + MQTT
+`project_file` straight to the printer, with live status/AMS/camera over local MQTT.
 
-- **Slicing** (`apps/web/src/lib/server/slicer.ts`) — a `MockSlicer` estimates grams/time
-  from model geometry. Swap in `services/slicer` (BambuStudio CLI) for real slicing.
-- **Bambu connectivity** (`apps/web/src/lib/server/bambu/`) — a `MockBambuProvider`
-  provisions demo printers/AMS. Swap in `services/bridge` (cloud/LAN MQTT) to go live.
-
-Each adapter has a single `getX()` factory; implementing the real class is the only change
-needed. See the headers in `services/slicer/src/index.js` and `services/bridge/src/index.js`.
+Known gap: **H2-series (H2C/H2D)** printing needs a newer OrcaSlicer engine than we bundle, so
+those models are auto-excluded from the queue for now — every other Bambu model prints.
 
 ## Desktop app
 
@@ -61,19 +56,22 @@ cd apps/electron && npm install
 SPARKPRINT_URL=https://your-deployment npm start
 ```
 
-## Deploy (production)
+## Deploy (on-site)
 
-Production is a containerized adapter-node server. See **[DEPLOY.md](DEPLOY.md)** for the
-Coolify guide and env vars. TL;DR:
+SparkPrint runs on a small always-on box **on the same network as the printers** (a Raspberry
+Pi 5 is ideal). One script installs everything — Node, OrcaSlicer, a local SQLite database, a
+systemd service, and an optional Cloudflare Tunnel to your own domain:
 
 ```bash
-cp apps/web/.env.example .env   # set APP_SECRET etc.
-docker compose up -d --build    # Postgres + web on :3000
+curl -fsSL https://raw.githubusercontent.com/sparkden/sparkprint/main/install.sh -o install.sh
+sudo bash install.sh
 ```
 
-Hardening in place: sessions hashed at rest, Bambu tokens AES-256-GCM encrypted,
-security headers + prod CSP, login/signup rate limiting, non-root container,
-`/healthz` probe, migrations-on-boot. CI (type-check + tests + build) and a GHCR image
-build run via GitHub Actions.
+See **[docs/PI-SETUP.md](docs/PI-SETUP.md)** and **[docs/LAN.md](docs/LAN.md)**. From source:
+`npm install && npm run build -w @sparkprint/web && node apps/web/build`.
+
+Hardening in place: sessions hashed at rest, printer LAN access codes never sent to the
+browser, security headers + prod CSP, login/signup rate limiting, a `/healthz` probe, and
+migrations applied on install.
 
 See `PROGRESS.md` for the full status log and roadmap.

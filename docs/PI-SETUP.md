@@ -26,8 +26,8 @@ The script is interactive and walks you through:
 
 1. **Network** — connects Wi-Fi if you're not already online.
 2. **Packages** — Node.js, the OrcaSlicer slicing engine (headless), fonts, build tools.
-3. **Database** — installs a local PostgreSQL (recommended for a standalone box) or uses a
-   connection URL you paste.
+3. **Database** — a local SQLite file (`apps/web/.data/sparkprint.db`); nothing to install or
+   configure.
 4. **Build & migrate** — builds the app and sets up the database tables.
 5. **Service** — installs a `systemd` service so SparkPrint starts automatically on every boot.
 6. **Cloudflare Tunnel** *(optional)* — publishes SparkPrint at `https://print.yourschool.org`
