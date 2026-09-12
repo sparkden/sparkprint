@@ -136,8 +136,8 @@
 			use:enhance={({ formData, cancel }) => {
 				if (!canSubmit) { cancel(); return; }
 				submitting = true;
-				// Multicolor (different colors across objects) → painted 3MF + one filament per color.
-				const mc = editor?.multicolor?.() ?? false;
+				// Any paint (multicolor, support or seam) → painted 3MF + one filament per color.
+				const mc = (editor?.multicolor?.() ?? false) || (editor?.hasPaint?.() ?? false);
 				if (mc) {
 					const painted = editor?.exportPainted3MF?.();
 					if (painted) formData.set('file', painted, (name || 'model') + '.3mf');

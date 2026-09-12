@@ -30,9 +30,61 @@
 	let paletteOpenId = $state<string | null>(null);
 	let fullscreen = $state(false);
 
+	// Painting: per-facet color (index into labColors, -1 = object base), support (1 enforce / 2
+	// block), seam (1). Stored on mesh.userData.paint. Brush picks what a click paints.
+	let brush = $state<{ kind: 'color' | 'support' | 'seam' | 'clear'; colorIdx: number; sub: 1 | 2 }>({ kind: 'color', colorIdx: 0, sub: 1 });
+	let painting = false;
+	function ensurePaint(m: any) {
+		if (!m.userData.paint) {
+			const n = m.geometry.getAttribute('position').count / 3;
+			m.userData.paint = { color: new Int16Array(n).fill(-1), support: new Uint8Array(n), seam: new Uint8Array(n) };
+		}
+		return m.userData.paint;
+	}
+	function hasAnyPaint(m: any): boolean {
+		const p = m.userData?.paint; if (!p) return false;
+		return p.support.some((x: number) => x) || p.seam.some((x: number) => x) || p.color.some((x: number) => x >= 0);
+	}
+	const SUP_ENFORCE = '#3f9a35', SUP_BLOCK = '#e04f35', SEAM_COL = '#3b76c4';
+	function refreshPaint(m: any) {
+		if (!THREE) return;
+		const p = m.userData?.paint; const geo = m.geometry; const n = geo.getAttribute('position').count;
+		if (!p || !hasAnyPaint(m)) { m.material.vertexColors = false; m.material.needsUpdate = true; return; }
+		const base = m.material.color;
+		const col = new Float32Array(n * 3);
+		const tmp = new THREE.Color();
+		for (let fct = 0; fct < n / 3; fct++) {
+			let c: any = base;
+			if (p.support[fct] === 1) c = tmp.set(SUP_ENFORCE);
+			else if (p.support[fct] === 2) c = tmp.set(SUP_BLOCK);
+			else if (p.seam[fct]) c = tmp.set(SEAM_COL);
+			else if (p.color[fct] >= 0 && labColors[p.color[fct]]) c = tmp.set(labColors[p.color[fct]].colorHex);
+			else c = base;
+			for (let v = 0; v < 3; v++) { const i = (fct * 3 + v) * 3; col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+		}
+		geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+		m.material.vertexColors = true; m.material.needsUpdate = true;
+	}
+	function paintFacet(m: any, f: number) {
+		const p = ensurePaint(m);
+		if (f < 0 || f >= p.color.length) return;
+		if (brush.kind === 'color') p.color[f] = brush.colorIdx;
+		else if (brush.kind === 'support') { p.support[f] = brush.sub; p.seam[f] = 0; }
+		else if (brush.kind === 'seam') { p.seam[f] = 1; p.support[f] = 0; }
+		else { p.color[f] = -1; p.support[f] = 0; p.seam[f] = 0; } // clear
+	}
+	function clearAllPaint() {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m || !m.userData.paint) return;
+		pushUndo();
+		delete m.userData.paint;
+		refreshPaint(m);
+		emitStats();
+	}
+
 	let objects = $state<ObjRow[]>([]);
 	let selectedId = $state<string | null>(null);
-	let mode = $state<'translate' | 'rotate' | 'scale'>('translate');
+	let mode = $state<'translate' | 'rotate' | 'scale' | 'paint'>('translate');
 	let loading = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let selInfo = $state<{ w: number; d: number; h: number; scalePct: number; rx: number; ry: number; rz: number } | null>(null);
@@ -57,7 +109,6 @@
 		return url;
 	}
 	export function count() { return objects.length; }
-	export function hasPaint() { return false; }
 
 	/** Export all objects as one binary STL, converted back to Z-up for the slicer. */
 	export function exportSTL(): Blob | null {
@@ -351,13 +402,16 @@
 		scene.add(plateGroup);
 	}
 
-	function applyMode(m: 'translate' | 'rotate' | 'scale') {
+	function applyMode(m: 'translate' | 'rotate' | 'scale' | 'paint') {
 		mode = m;
+		if (m === 'paint') { gizmo?.detach?.(); return; } // painting uses raycast clicks, not gizmo
 		if (gizmo && gizmo.setMode) {
 			gizmo.setMode(m);
 			gizmo.showX = true;
 			gizmo.showZ = true;
 			gizmo.showY = m !== 'translate';
+			const sel = selectedId ? meshes.get(selectedId) : null;
+			if (sel) gizmo.attach(sel);
 		}
 	}
 	$effect(() => { plate.x; plate.y; if (THREE && scene) buildPlate(); });
@@ -377,24 +431,30 @@
 		objects = objects.map((o) => (o.id === id ? { ...o, color: c } : o));
 		paletteOpenId = null;
 	}
-	/** Distinct colors across all objects, first-seen order → the filament list. */
-	export function getColorRequest(): { filamentType: string; colorHex: string; colorName?: string }[] {
-		const out: { filamentType: string; colorHex: string; colorName?: string }[] = [];
+	type Col = { filamentType: string; colorHex: string; colorName?: string };
+	const asReq = (c: LabColor): Col => ({ filamentType: c.filamentType, colorHex: c.colorHex, colorName: c.colorName ?? undefined });
+	/** Distinct colors across object bases + painted facets, first-seen order → the filament list. */
+	export function getColorRequest(): Col[] {
+		const out: Col[] = [];
+		const push = (c: Col) => { if (!out.some((x) => x.colorHex === c.colorHex && x.filamentType === c.filamentType)) out.push(c); };
 		for (const o of objects) {
-			if (!out.some((c) => c.colorHex === o.color.colorHex && c.filamentType === o.color.filamentType)) {
-				out.push({ filamentType: o.color.filamentType, colorHex: o.color.colorHex, colorName: o.color.colorName ?? undefined });
-			}
+			push(asReq(o.color));
+			const p = meshes.get(o.id)?.userData?.paint;
+			if (p) { const seen = new Set<number>(); for (const ci of p.color) if (ci >= 0 && !seen.has(ci) && labColors[ci]) { seen.add(ci); push(asReq(labColors[ci])); } }
 		}
-		return out.length ? out : [{ filamentType: baseColor().filamentType, colorHex: baseColor().colorHex, colorName: baseColor().colorName ?? undefined }];
+		return out.length ? out : [asReq(baseColor())];
 	}
 	export function multicolor(): boolean {
 		return getColorRequest().length > 1;
 	}
-	/** Painted Bambu 3MF: each object's facets tagged with its color's filament index (0-based). */
+	export function hasPaint(): boolean {
+		return objects.some((o) => hasAnyPaint(meshes.get(o.id)));
+	}
+	/** Painted Bambu 3MF: per-facet filament (base or painted), support and seam. */
 	export function exportPainted3MF(): Blob | null {
 		if (!objects.length) return null;
 		const palette = getColorRequest();
-		const idxOf = (o: ObjRow) => Math.max(0, palette.findIndex((c) => c.colorHex === o.color.colorHex && c.filamentType === o.color.filamentType));
+		const idxOfCol = (c: Col) => Math.max(0, palette.findIndex((x) => x.colorHex === c.colorHex && x.filamentType === c.filamentType));
 		const parts: Part[] = [];
 		for (const o of objects) {
 			const m = meshes.get(o.id);
@@ -406,13 +466,16 @@
 			const ng = g.index ? g.toNonIndexed() : g;
 			const pos = ng.getAttribute('position').array as Float32Array;
 			const nTri = pos.length / 9;
-			const fil = idxOf(o);
-			parts.push({
-				positions: new Float32Array(pos),
-				support: new Uint8Array(nTri),
-				seam: new Uint8Array(nTri),
-				colorIndex: new Int16Array(nTri).fill(fil)
-			});
+			const baseIdx = idxOfCol(asReq(o.color));
+			const p = m.userData?.paint;
+			const colorIndex = new Int16Array(nTri);
+			const support = new Uint8Array(nTri);
+			const seam = new Uint8Array(nTri);
+			for (let f = 0; f < nTri; f++) {
+				colorIndex[f] = p && p.color[f] >= 0 && labColors[p.color[f]] ? idxOfCol(asReq(labColors[p.color[f]])) : baseIdx;
+				if (p) { support[f] = p.support[f] ?? 0; seam[f] = p.seam[f] ?? 0; }
+			}
+			parts.push({ positions: new Float32Array(pos), support, seam, colorIndex });
 		}
 		if (!parts.length) return null;
 		const bytes = build3MF(parts, palette.length);
@@ -454,13 +517,36 @@
 		}
 	}
 
-	function onPointerDown(ev: PointerEvent) {
-		if (gizmo?.dragging) return;
+	function hitAt(ev: PointerEvent) {
 		const rect = renderer.domElement.getBoundingClientRect();
 		const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
 		raycaster.setFromCamera(ndc, camera);
-		const hit = raycaster.intersectObjects([...meshes.values()], false)[0];
+		return raycaster.intersectObjects([...meshes.values()], false)[0];
+	}
+	function onPointerDown(ev: PointerEvent) {
+		if (gizmo?.dragging) return;
+		const hit = hitAt(ev);
+		if (mode === 'paint') {
+			if (hit?.object && hit.faceIndex != null) {
+				const m = hit.object;
+				if (selectedId !== m.userData.id) select(m.userData.id);
+				pushUndo();
+				painting = true;
+				orbit.enabled = false;
+				paintFacet(m, hit.faceIndex);
+				refreshPaint(m);
+			}
+			return;
+		}
 		if (hit?.object?.userData?.id) select(hit.object.userData.id);
+	}
+	function onPointerMove(ev: PointerEvent) {
+		if (!painting || mode !== 'paint') return;
+		const hit = hitAt(ev);
+		if (hit?.object && hit.faceIndex != null) { paintFacet(hit.object, hit.faceIndex); refreshPaint(hit.object); }
+	}
+	function onPointerUp() {
+		if (painting) { painting = false; orbit.enabled = true; emitStats(); }
 	}
 	function onKey(e: KeyboardEvent) {
 		const t = e.target as HTMLElement;
@@ -475,6 +561,7 @@
 		if (k === 'm') applyMode('translate');
 		else if (k === 'r') applyMode('rotate');
 		else if (k === 's') applyMode('scale');
+		else if (k === 'p') applyMode('paint');
 		else if (k === 'a') arrange();
 		else if (k === 'l') layFlatSelected();
 		else if (k === 'f') frameCamera();
@@ -548,6 +635,8 @@
 
 			const el = renderer.domElement;
 			el.addEventListener('pointerdown', onPointerDown);
+			el.addEventListener('pointermove', onPointerMove);
+			window.addEventListener('pointerup', onPointerUp);
 			window.addEventListener('keydown', onKey);
 			window.addEventListener('keyup', onKeyUp);
 
@@ -555,13 +644,14 @@
 			ro = new ResizeObserver(resize); ro.observe(container); resize();
 			(function animate() { raf = requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); })();
 		})();
-		return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); renderer?.dispose?.(); if (renderer?.domElement && container?.contains(renderer.domElement)) container.removeChild(renderer.domElement); };
+		return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerup', onPointerUp); renderer?.dispose?.(); if (renderer?.domElement && container?.contains(renderer.domElement)) container.removeChild(renderer.domElement); };
 	});
 
 	const tools = [
 		{ id: 'translate', icon: 'move', label: 'Move', key: 'M' },
 		{ id: 'rotate', icon: 'rotate', label: 'Rotate', key: 'R' },
-		{ id: 'scale', icon: 'scale', label: 'Scale', key: 'S' }
+		{ id: 'scale', icon: 'scale', label: 'Scale', key: 'S' },
+		{ id: 'paint', icon: 'palette', label: 'Paint', key: 'P' }
 	] as const;
 </script>
 
@@ -572,6 +662,31 @@
 	<div class="pointer-events-none absolute left-3 top-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[11px] font-medium text-soft-ink backdrop-blur">
 		{plate.x} × {plate.y} × {plate.z} mm{#if objects.length} · {objects.length} object{objects.length === 1 ? '' : 's'}{/if}
 	</div>
+
+	<!-- Paint palette (color / support / seam brushes) -->
+	{#if mode === 'paint' && objects.length}
+		<div class="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-xl border border-warm-200 bg-surface/95 p-2 text-xs shadow-lg backdrop-blur">
+			<div class="flex flex-wrap items-center gap-1.5">
+				<span class="font-semibold text-muted-ink">Paint:</span>
+				<button type="button" class="rounded px-2 py-1 {brush.kind === 'color' ? 'bg-spark text-white' : 'hover:bg-warm-100'}" onclick={() => (brush.kind = 'color')}>Color</button>
+				<button type="button" class="rounded px-2 py-1 {brush.kind === 'support' ? 'bg-spark text-white' : 'hover:bg-warm-100'}" onclick={() => (brush.kind = 'support')}>Support</button>
+				<button type="button" class="rounded px-2 py-1 {brush.kind === 'seam' ? 'bg-spark text-white' : 'hover:bg-warm-100'}" onclick={() => (brush.kind = 'seam')}>Seam</button>
+				<button type="button" class="rounded px-2 py-1 {brush.kind === 'clear' ? 'bg-spark text-white' : 'hover:bg-warm-100'}" onclick={() => (brush.kind = 'clear')}>Erase</button>
+				<span class="mx-1 h-4 w-px bg-warm-200"></span>
+				{#if brush.kind === 'color'}
+					{#each labColors as c, i}
+						<button type="button" title={c.colorName ?? c.colorHex} onclick={() => (brush.colorIdx = i)} class="h-6 w-6 rounded border-2 hover:scale-110 {brush.colorIdx === i ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}"></button>
+					{/each}
+				{:else if brush.kind === 'support'}
+					<button type="button" class="rounded px-2 py-1 {brush.sub === 1 ? 'bg-warm-200' : 'hover:bg-warm-100'}" onclick={() => (brush.sub = 1)}>Enforce</button>
+					<button type="button" class="rounded px-2 py-1 {brush.sub === 2 ? 'bg-warm-200' : 'hover:bg-warm-100'}" onclick={() => (brush.sub = 2)}>Block</button>
+				{/if}
+				<span class="mx-1 h-4 w-px bg-warm-200"></span>
+				<button type="button" class="rounded px-2 py-1 text-danger hover:bg-warm-100" onclick={clearAllPaint}>Clear all</button>
+			</div>
+			<p class="mt-1 px-1 text-[10px] text-muted-ink">Drag over the model to paint facets.</p>
+		</div>
+	{/if}
 	{#if loading}<div class="absolute inset-0 flex items-center justify-center bg-surface/60 text-sm text-soft-ink">Loading…</div>{/if}
 	{#if errorMsg}<div role="button" tabindex="0" onclick={() => (errorMsg = null)} onkeydown={() => (errorMsg = null)} class="absolute inset-x-3 bottom-3 z-10 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{errorMsg}</div>{/if}
 	{#if objects.length === 0 && !loading}<div class="absolute inset-0 flex items-center justify-center text-sm text-muted-ink">Add a model to start</div>{/if}
