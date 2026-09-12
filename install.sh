@@ -28,7 +28,8 @@ APP_DIR="${SPARKPRINT_DIR:-/opt/sparkprint}"
 APP_USER="sparkprint"
 APP_PORT="${SPARKPRINT_PORT:-3000}"
 NODE_MAJOR="22"
-ORCA_VERSION="${ORCA_VERSION:-2.4.2}"
+# "latest" = newest release that matches this machine's arch + glibc. Pin a version to override.
+ORCA_VERSION="${ORCA_VERSION:-latest}"
 
 # ── Pretty output ─────────────────────────────────────────────────────────────
 if [ -t 1 ]; then B="\033[1m"; G="\033[32m"; Y="\033[33m"; R="\033[31m"; C="\033[36m"; N="\033[0m"; else B=""; G=""; Y=""; R=""; C=""; N=""; fi
@@ -77,17 +78,22 @@ step "2/9  System packages"
 if [ "$PM" = apt ]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
+  # libgl1-mesa-dri = software (llvmpipe) GL so OrcaSlicer renders under Xvfb on a GPU-less Pi.
+  # The libx*/libxkbcommon/dbus set covers the GTK/X runtime the AppImage expects.
   apt-get install -y -qq \
     ca-certificates curl git build-essential python3 xvfb ffmpeg \
-    libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
-    libwebkit2gtk-4.1-0 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
-    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgtk-3-0 libgomp1 libnss3 fontconfig fonts-dejavu-core >/dev/null
+    libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
+    libwebkit2gtk-4.1-0 libxkbcommon0 libdbus-1-3 libxrandr2 libxfixes3 libxcursor1 libxi6 \
+    libxcomposite1 libxdamage1 libxtst6 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
+    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libxkbcommon0 libdbus-1-3 fontconfig fonts-dejavu-core >/dev/null
 else
-  # Arch: base-devel (gcc/make), Xvfb, and the AppImage's GL/GTK runtime libs.
+  # Arch: base-devel (gcc/make), Xvfb, and the AppImage's GL/GTK runtime libs. mesa ships the
+  # software (swrast/llvmpipe) GL driver used for headless rendering.
   pacman -Sy --needed --noconfirm \
     ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg \
-    mesa libglvnd glu gtk3 gcc-libs nss libsecret webkit2gtk-4.1 fontconfig ttf-dejavu >/dev/null 2>&1 \
-    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret fontconfig ttf-dejavu >/dev/null
+    mesa libglvnd glu gtk3 gcc-libs nss libsecret webkit2gtk-4.1 libxkbcommon dbus \
+    libxrandr libxcursor libxi libxcomposite libxdamage libxtst fontconfig ttf-dejavu >/dev/null 2>&1 \
+    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret libxkbcommon dbus fontconfig ttf-dejavu >/dev/null
 fi
 ok "Base packages installed."
 
@@ -128,32 +134,82 @@ DATABASE_URL="./.data/sparkprint.db"
 ok "Using a local SQLite database ($APP_DIR/apps/web/.data/sparkprint.db)."
 
 # ── 5. OrcaSlicer (headless slicing) ─────────────────────────────────────────────
-step "5/9  OrcaSlicer (slicing engine)"
+step "5/9  OrcaSlicer (slicing engine → real Bambu G-code + sliced previews)"
 ORCA_DIR="$APP_DIR/slicers/orca"
 ORCA_APPRUN="$ORCA_DIR/squashfs-root/AppRun"
+GLIBC_OK=0
+[ "$(printf '%s\n2.39\n' "$GLIBC" | sort -V | head -1)" = "2.39" ] && GLIBC_OK=1
+
+# Find the newest OrcaSlicer Linux AppImage that matches this machine's arch + glibc.
+# Uses the GitHub releases API (no hardcoded filenames, so it survives version bumps). Prints
+# a download URL on success; nothing on failure. Honours an explicit ORCA_VERSION pin.
+resolve_orca_url() {
+  local api="https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases?per_page=40"
+  local all; all="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api" 2>/dev/null | grep -oE 'https://[^"]+\.AppImage' || true)"
+  [ -n "$all" ] || return 1
+  # Drop nightly / experimental builds — only tagged stable releases.
+  all="$(printf '%s\n' "$all" | grep -Eiv 'nightly|_belt|alpha|beta|_rc' || true)"
+  # Keep only Linux AppImages for this arch (x86_64 builds simply lack an aarch64/arm64 token).
+  if [ "$ARCH" = aarch64 ]; then all="$(printf '%s\n' "$all" | grep -Ei 'aarch64|arm64' || true)"
+  else all="$(printf '%s\n' "$all" | grep -Eiv 'aarch64|arm64' || true)"; fi
+  [ -n "$all" ] || return 1
+  # If an explicit version was pinned, keep only that tag's assets (fall back to all if none match).
+  if [ -n "${ORCA_VERSION:-}" ] && [ "$ORCA_VERSION" != latest ]; then
+    local pinned; pinned="$(printf '%s\n' "$all" | grep -E "/v?${ORCA_VERSION}/" || true)"
+    [ -n "$pinned" ] && all="$pinned"
+  fi
+  # On older glibc (< 2.39) prefer an Ubuntu 22.04 build; only use a 24.04 build if nothing else.
+  if [ "$GLIBC_OK" -ne 1 ]; then
+    local u22; u22="$(printf '%s\n' "$all" | grep -Ei 'ubuntu.?22' || true)"
+    if [ -n "$u22" ]; then all="$u22"; else return 2; fi   # 2 = only-incompatible-builds-exist
+  fi
+  printf '%s\n' "$all" | head -1
+}
+
 if [ -x "$ORCA_APPRUN" ]; then
   ok "OrcaSlicer already installed."
 else
-  # The Ubuntu-24.04 AppImage needs glibc >= 2.39. Pi OS Trixie (2.41) is fine; Bookworm (2.36) is not.
-  if [ "$(printf '%s\n2.39\n' "$GLIBC" | sort -V | head -1)" != "2.39" ]; then
-    warn "This OS has glibc $GLIBC; OrcaSlicer $ORCA_VERSION needs >= 2.39."
-    warn "Slicing will fall back to the bundled Slic3r (non-Bambu G-code)."
-    warn "For full OrcaSlicer support, use Raspberry Pi OS 'Trixie' (64-bit) or newer."
-  else
-    mkdir -p "$ORCA_DIR"
-    # aarch64 (Pi) vs x86_64 (most Arch/desktop boxes) — Bambu's x64 AppImage has no arch suffix.
-    if [ "$ARCH" = "aarch64" ]; then ORCA_ASSET="OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCA_VERSION}.AppImage"
-    else ORCA_ASSET="OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCA_VERSION}.AppImage"; fi
-    URL="https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/${ORCA_ASSET}"
-    echo "  Downloading OrcaSlicer $ORCA_VERSION ($ARCH)…"
-    if curl -fsSL "$URL" -o "$ORCA_DIR/orca.AppImage"; then
-      chmod +x "$ORCA_DIR/orca.AppImage"
-      ( cd "$ORCA_DIR" && ./orca.AppImage --appimage-extract >/dev/null 2>&1 ) && rm -f "$ORCA_DIR/orca.AppImage"
-      [ -x "$ORCA_APPRUN" ] && ok "OrcaSlicer installed." || warn "OrcaSlicer extract failed; will use the Slic3r fallback."
+  mkdir -p "$ORCA_DIR"
+  echo "  Finding a compatible OrcaSlicer build (arch $ARCH, glibc $GLIBC)…"
+  set +e; URL="$(resolve_orca_url)"; RESOLVE_RC=$?; set -e
+  if [ -z "$URL" ]; then
+    if [ "$RESOLVE_RC" = 2 ]; then
+      warn "This OS has glibc $GLIBC, but OrcaSlicer only ships glibc≥2.39 builds for $ARCH."
+      warn "Use Raspberry Pi OS 'Trixie' (64-bit) or newer for real Bambu G-code + sliced previews."
     else
-      warn "Couldn't download OrcaSlicer; will use the Slic3r fallback."
+      warn "Couldn't reach the OrcaSlicer release list (offline or rate-limited)."
+    fi
+    warn "Slicing will fall back to the bundled Slic3r (no sliced preview, non-Bambu G-code)."
+  else
+    echo "  Downloading $(basename "$URL")…"
+    if curl -fSL "$URL" -o "$ORCA_DIR/orca.AppImage"; then
+      chmod +x "$ORCA_DIR/orca.AppImage"
+      # Extract (AppImages can't FUSE-mount headless) → squashfs-root/AppRun is what the app calls.
+      ( cd "$ORCA_DIR" && ./orca.AppImage --appimage-extract >/dev/null 2>&1 ) && rm -f "$ORCA_DIR/orca.AppImage"
+      [ -x "$ORCA_APPRUN" ] && ok "OrcaSlicer installed." || warn "OrcaSlicer extract failed; using the Slic3r fallback."
+    else
+      warn "Download failed; using the Slic3r fallback."
     fi
   fi
+fi
+
+# Smoke test: can the AppImage actually start headless (all shared libs resolve under Xvfb)?
+# We treat "started without a missing-library error and didn't hang" as working — OrcaSlicer's
+# --help may exit non-zero on some builds, so a dynamic-linker failure is the real signal.
+ORCA_WORKS=0
+if [ -x "$ORCA_APPRUN" ]; then
+  SMOKE="$(mktemp)"
+  if command -v xvfb-run >/dev/null 2>&1; then
+    timeout 90 xvfb-run -a "$ORCA_APPRUN" --help >"$SMOKE" 2>&1; SMOKE_RC=$?
+  else SMOKE_RC=1; fi
+  if [ "$SMOKE_RC" != 124 ] && ! grep -qi 'error while loading shared libraries\|cannot open shared object' "$SMOKE"; then
+    ORCA_WORKS=1; ok "OrcaSlicer runs headless — sliced previews are enabled."
+  else
+    warn "OrcaSlicer is installed but didn't start headless (missing library, GL, or timed out)."
+    [ -s "$SMOKE" ] && warn "  $(grep -i 'shared librar\|shared object' "$SMOKE" | head -1)"
+    warn "The app will fall back to Slic3r (no sliced preview). Logs: journalctl -u sparkprint -e"
+  fi
+  rm -f "$SMOKE"
 fi
 chown -R "$APP_USER:$APP_USER" "$ORCA_DIR" 2>/dev/null || true
 
@@ -270,13 +326,16 @@ IP="$(hostname -I | awk '{print $1}')"
 step "Done 🎉"
 echo -e "  Local:   ${B}http://$IP:$APP_PORT${N}"
 grep -q 'ORIGIN="https' "$ENV_FILE" 2>/dev/null && echo -e "  Public:  ${B}$(grep -oP '(?<=^ORIGIN=").*(?=")' "$ENV_FILE")${N}"
+if [ "$ORCA_WORKS" = 1 ]; then echo -e "  Slicer:  ${G}OrcaSlicer (real Bambu G-code + sliced previews)${N}"
+else echo -e "  Slicer:  ${Y}Slic3r fallback — no sliced preview (install OrcaSlicer for previews)${N}"; fi
 cat <<EOF
 
-  Next steps:
+  Next steps (everything is on your local network — no Bambu cloud account needed):
     1. Open SparkPrint in a browser and finish the first-run admin setup.
-    2. Admin → Printers → connect your Bambu account (imports printers + access codes).
-    3. For each printer, set its Local IP under "LAN printing" (or click "Discover on network").
-       See the LAN guide:  $APP_DIR/docs/LAN.md
+    2. Admin → Printers → Add printer. Set each printer's Local IP + Access code
+       (Bambu screen → Settings → WLAN), or click "Discover on network".
+    3. Put each printer in LAN-only mode on its own screen, then load filament so
+       its colors show up for students.  Full guide:  $APP_DIR/docs/LAN.md
 
   Manage the service:
     sudo systemctl status sparkprint      # is it running?
