@@ -28,6 +28,7 @@ export type SliceSettings = {
 	adhesion?: string; // 'none' | 'skirt' | 'brim' | 'raft'
 	printerModel?: string; // X1C | P1S | … — selects the OrcaSlicer machine profile
 	filamentType?: string; // 'PLA' | 'PETG' | 'ABS' — selects the filament profile
+	filamentTypes?: string[]; // one per color for multicolor (AMS)
 };
 
 const CANDIDATES = ['orca-slicer', 'OrcaSlicer', 'prusa-slicer', 'prusa-slicer-console', 'superslicer', 'slic3r', 'bambu-studio', 'CuraEngine'];

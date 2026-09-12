@@ -33,7 +33,9 @@ async function sliceJob(jobId: string) {
 		const [p] = await db.select({ model: printers.model }).from(printers).where(eq(printers.id, job.printerId)).limit(1);
 		if (p?.model) printerModel = p.model;
 	}
-	const filamentType = job.colorRequest?.[0]?.filamentType || 'PLA';
+	// One filament per requested color (multicolor via AMS); painted 3MF carries the assignments.
+	const filamentTypes = (job.colorRequest ?? []).map((c) => c.filamentType || 'PLA');
+	const filamentType = filamentTypes[0] || 'PLA';
 
 	const proc = (job.process ?? {}) as Record<string, unknown>;
 	const settings = {
@@ -43,7 +45,8 @@ async function sliceJob(jobId: string) {
 		raft: Boolean(proc.raft),
 		adhesion: typeof proc.adhesion === 'string' ? proc.adhesion : undefined,
 		printerModel,
-		filamentType
+		filamentType,
+		filamentTypes: filamentTypes.length > 1 ? filamentTypes : undefined
 	};
 	let result;
 	try {

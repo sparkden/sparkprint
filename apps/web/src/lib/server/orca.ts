@@ -26,6 +26,7 @@ export type OrcaSettings = {
 	brim?: boolean;
 	printerModel?: string; // our model code: X1C | X1 | X1E | P1S | P1P | A1 | A1M | H2D
 	filamentType?: string; // 'PLA' | 'PLA Matte' | 'PETG' | 'ABS' | 'TPU'
+	filamentTypes?: string[]; // one per color for multicolor (AMS) — overrides filamentType
 };
 
 export type OrcaResult = { gcodePath: string; grams: number; timeSec: number };
@@ -198,7 +199,9 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	const machineName = MACHINE[model] ?? MACHINE.P1S;
 	const layerHeight = s.layerHeightMm && s.layerHeightMm > 0 ? s.layerHeightMm : 0.2;
 	const baseProcess = await pickProcess(loc.profiles, model, layerHeight);
-	const filament = await pickFilament(loc.profiles, s.filamentType || 'PLA');
+	// One filament profile per requested color (multicolor via AMS). Falls back to a single filament.
+	const filTypes = s.filamentTypes && s.filamentTypes.length ? s.filamentTypes : [s.filamentType || 'PLA'];
+	const filamentNames = await Promise.all(filTypes.map((t) => pickFilament(loc.profiles, t)));
 
 	const outDir = await mkdtemp(join(tmpdir(), 'orca-'));
 	const overridePath = join(outDir, 'override.json');
@@ -218,7 +221,7 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	await writeFile(overridePath, JSON.stringify(override));
 
 	const machinePath = join(loc.profiles, 'machine', `${machineName}.json`);
-	const filamentPath = join(loc.profiles, 'filament', `${filament}.json`);
+	const filamentPaths = filamentNames.map((f) => join(loc.profiles, 'filament', `${f}.json`)).join(';');
 	// --export-3mf produces a proper Bambu printable 3mf (Metadata/plate_1.gcode + md5 + plate
 	// config) — that's what Bambu's cloud accepts. Its path is resolved relative to --outputdir,
 	// so pass a bare filename. --slice 0 also drops plate_1.gcode, which we parse for metrics.
@@ -229,7 +232,7 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		'--load-settings',
 		`${machinePath};${overridePath}`,
 		'--load-filaments',
-		filamentPath,
+		filamentPaths,
 		'--slice',
 		'0',
 		'--export-3mf',
