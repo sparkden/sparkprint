@@ -4,10 +4,10 @@
  * and cloudprint.ts (print dispatch).
  */
 
-// H2C/H2S are combo (laser/cutter) machines: we identify them so they aren't mistaken for a
-// plain FDM printer, but they can't be driven by the standard cloud FDM print task (see
+// H2-series (H2D/H2D Pro/H2S/H2C) are dual-nozzle machines. We identify them for monitoring +
+// LAN control, but they're excluded from the print queue until H2 slicing is wired (see
 // isCloudPrintable in jobs.ts).
-export type BambuDeviceModel = 'X1' | 'X1C' | 'X1E' | 'P1S' | 'P1P' | 'A1' | 'A1M' | 'H2D' | 'H2C' | 'H2S';
+export type BambuDeviceModel = 'X1' | 'X1C' | 'X1E' | 'P1S' | 'P1P' | 'A1' | 'A1M' | 'H2D' | 'H2DP' | 'H2C' | 'H2S';
 
 export type DiscoveredSlot = {
 	slotIndex: number;

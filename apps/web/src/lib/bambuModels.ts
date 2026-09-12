@@ -1,6 +1,6 @@
 // Full Bambu Lab printer catalog — build volumes (mm), default AMS support, nozzle.
 // Shared by manual add, the printer select, and the studio build-plate sizing.
-export type BambuModel = 'X1' | 'X1C' | 'X1E' | 'P1P' | 'P1S' | 'A1' | 'A1M' | 'H2D' | 'H2C' | 'H2S';
+export type BambuModel = 'X1' | 'X1C' | 'X1E' | 'P1P' | 'P1S' | 'A1' | 'A1M' | 'H2D' | 'H2DP' | 'H2C' | 'H2S';
 
 export type BambuModelInfo = {
 	id: BambuModel;
@@ -20,7 +20,10 @@ export const BAMBU_MODELS: BambuModelInfo[] = [
 	{ id: 'P1P', label: 'P1P', series: 'P1', bed: { x: 256, y: 256, z: 256 }, ams: true, nozzle: 0.4, enclosed: false },
 	{ id: 'A1', label: 'A1', series: 'A1', bed: { x: 256, y: 256, z: 256 }, ams: true, nozzle: 0.4, enclosed: false },
 	{ id: 'A1M', label: 'A1 mini', series: 'A1', bed: { x: 180, y: 180, z: 180 }, ams: true, nozzle: 0.4, enclosed: false },
-	{ id: 'H2D', label: 'H2D', series: 'H2', bed: { x: 325, y: 320, z: 325 }, ams: true, nozzle: 0.4, enclosed: true }
+	{ id: 'H2D', label: 'H2D', series: 'H2', bed: { x: 325, y: 320, z: 325 }, ams: true, nozzle: 0.4, enclosed: true },
+	{ id: 'H2DP', label: 'H2D Pro', series: 'H2', bed: { x: 325, y: 320, z: 325 }, ams: true, nozzle: 0.4, enclosed: true },
+	{ id: 'H2S', label: 'H2S', series: 'H2', bed: { x: 325, y: 320, z: 325 }, ams: true, nozzle: 0.4, enclosed: true },
+	{ id: 'H2C', label: 'H2C', series: 'H2', bed: { x: 330, y: 320, z: 325 }, ams: true, nozzle: 0.4, enclosed: true }
 ];
 
 export const MODEL_IDS = BAMBU_MODELS.map((m) => m.id) as [BambuModel, ...BambuModel[]];
@@ -36,6 +39,7 @@ export function ssdpModelToCode(model: string | null | undefined): BambuModel {
 	const m = (model ?? '').toUpperCase();
 	if (/O1C2|H2C/.test(m)) return 'H2C';
 	if (/O1S|H2S/.test(m)) return 'H2S';
+	if (/H2DP|H2D ?PRO|O1D ?PRO/.test(m)) return 'H2DP';
 	if (/O1D|H2D/.test(m)) return 'H2D';
 	if (/C13|X1E/.test(m)) return 'X1E';
 	if (/BL-?P002|3DPRINTER-X1-CARBON|X1C|X1 CARBON/.test(m)) return 'X1C';
