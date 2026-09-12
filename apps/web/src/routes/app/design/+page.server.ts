@@ -206,7 +206,8 @@ export const actions: Actions = {
 				colorName: z.string().max(60).optional(),
 				filamentType: z.string().max(20),
 				copies: z.coerce.number().int().min(1).max(20),
-				printerModelTarget: z.preprocess((v) => (v && v !== 'auto' ? String(v) : null), z.string().nullable())
+				printerModelTarget: z.preprocess((v) => (v && v !== 'auto' ? String(v) : null), z.string().nullable()),
+				colorRequest: z.string().optional() // JSON array for multicolor prints
 			})
 			.safeParse({
 				name: fd.get('name') || file.name.replace(/\.gcode\.3mf$/i, ''),
@@ -214,10 +215,21 @@ export const actions: Actions = {
 				colorName: fd.get('colorName') ?? undefined,
 				filamentType: fd.get('filamentType') ?? 'PLA',
 				copies: fd.get('copies') ?? 1,
-				printerModelTarget: fd.get('printerModelTarget')
+				printerModelTarget: fd.get('printerModelTarget'),
+				colorRequest: fd.get('colorRequest') ?? undefined
 			});
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
 		const d = parsed.data;
+
+		// One entry per filament in the sliced file (multicolor), else the single picked color.
+		const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional() });
+		let colorRequest: { filamentType: string; colorHex: string; colorName?: string }[] = [{ filamentType: d.filamentType, colorHex: d.colorHex, colorName: d.colorName }];
+		if (d.colorRequest) {
+			let raw: unknown = null;
+			try { raw = JSON.parse(d.colorRequest); } catch { raw = null; }
+			const pc = z.array(colorItem).min(1).max(16).safeParse(raw);
+			if (pc.success) colorRequest = pc.data;
+		}
 
 		const key = `org/${user.orgId}/uploads/${randomUUID()}.gcode.3mf`;
 		await putBuffer(key, buf);
@@ -228,7 +240,7 @@ export const actions: Actions = {
 			userId: user.id,
 			modelId: null,
 			name: d.name,
-			colorRequest: [{ filamentType: d.filamentType, colorHex: d.colorHex, colorName: d.colorName }],
+			colorRequest,
 			layerHeightMm: 0.2,
 			infillPct: 15,
 			supports: false,

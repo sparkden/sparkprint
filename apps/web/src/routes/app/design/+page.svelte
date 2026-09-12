@@ -1,16 +1,66 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { unzipSync, strFromU8 } from 'fflate';
 	import StudioEditor from '$lib/components/StudioEditor.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import { colorDistance } from '$lib/color';
 	let { data, form } = $props();
 
+	type LabColor = (typeof data.colors)[number];
 	let name = $state('');
-	let selected = $state<(typeof data.colors)[number] | null>(data.colors.find((c) => c.available) ?? data.colors[0] ?? null);
+	let selected = $state<LabColor | null>(data.colors.find((c) => c.available) ?? data.colors[0] ?? null);
 	let quality = $state(0.2); // layer height
 	let supports = $state(false);
 	let raft = $state(false);
 	let copies = $state(1);
 	let mode = $state<'design' | 'upload'>('design'); // 'upload' = print a Bambu Studio .gcode.3mf
+
+	// Multicolor: filaments detected in an uploaded sliced 3mf, each mapped to a lab color.
+	type DetectedFilament = { index: number; bakedHex: string | null; type: string };
+	let detected = $state<DetectedFilament[]>([]);
+	let filamentColors = $state<(LabColor | null)[]>([]);
+
+	function nearestLabColor(hex: string | null): LabColor | null {
+		if (!data.colors.length) return null;
+		if (!hex) return data.colors.find((c) => c.available) ?? data.colors[0];
+		let best = data.colors[0];
+		let bestD = Infinity;
+		for (const c of data.colors) {
+			const d = colorDistance(hex, c.colorHex);
+			if (d < bestD) { bestD = d; best = c; }
+		}
+		return best;
+	}
+
+	async function onSlicedFile(e: Event) {
+		const f = (e.target as HTMLInputElement).files?.[0];
+		detected = [];
+		filamentColors = [];
+		if (!f) return;
+		try {
+			const files = unzipSync(new Uint8Array(await f.arrayBuffer()));
+			const si = files['Metadata/slice_info.config'];
+			if (si) {
+				const xml = strFromU8(si);
+				const plate = xml.split('<plate>')[1] ?? xml; // first plate
+				const fils = [...plate.matchAll(/<filament\b[^>]*\/?>/g)];
+				detected = fils.map((m, i) => ({
+					index: i,
+					bakedHex: (/color="([^"]+)"/i.exec(m[0])?.[1] ?? null)?.slice(0, 7) ?? null,
+					type: /type="([^"]+)"/i.exec(m[0])?.[1] ?? 'PLA'
+				}));
+			}
+			if (detected.length === 0) detected = [{ index: 0, bakedHex: null, type: 'PLA' }];
+			filamentColors = detected.map((d) => nearestLabColor(d.bakedHex));
+		} catch {
+			detected = [{ index: 0, bakedHex: null, type: 'PLA' }];
+			filamentColors = [nearestLabColor(null)];
+		}
+	}
+	const uploadColorRequest = $derived(
+		filamentColors.map((c, i) => ({ filamentType: c?.filamentType ?? detected[i]?.type ?? 'PLA', colorHex: c?.colorHex ?? '#FF5B14', colorName: c?.colorName ?? '' }))
+	);
+	const uploadReady = $derived(detected.length > 0 && filamentColors.every((c) => !!c));
 	let stats = $state<{ bbox: { x: number; y: number; z: number }; volumeMm3: number; triangles: number; objects: number } | null>(null);
 	let submitting = $state(false);
 
@@ -173,33 +223,49 @@
 			</div>
 			<div>
 				<label class="label" for="uf">Sliced file (.gcode.3mf)</label>
-				<input class="input" id="uf" name="file" type="file" accept=".3mf,.gcode.3mf" required />
+				<input class="input" id="uf" name="file" type="file" accept=".3mf,.gcode.3mf" required onchange={onSlicedFile} />
 			</div>
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div><label class="label" for="un">Name</label><input class="input" id="un" name="name" placeholder="My print" /></div>
 				<div><label class="label" for="ucp">Copies</label><input class="input" id="ucp" name="copies" type="number" min="1" max="20" value="1" /></div>
 			</div>
-			<div>
-				<div class="mb-2 flex items-center justify-between"><span class="label mb-0">Color to route to</span>{#if selected}<span class="text-xs text-muted-ink">{selected.colorName ?? selected.colorHex} · {selected.filamentType}</span>{/if}</div>
-				{#if data.colors.length === 0}<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
-				{:else}
-					<div class="flex flex-wrap gap-2">
-						{#each data.colors as c}
-							<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => (selected = c)}
-								class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
-								{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
-							</button>
+
+			{#if data.colors.length === 0}
+				<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
+			{:else if detected.length === 0}
+				<p class="rounded-lg bg-warm-50 px-3 py-2 text-sm text-muted-ink">Choose a sliced file above and we'll detect its colors.</p>
+			{:else}
+				<div>
+					<span class="label">{detected.length > 1 ? `Map the ${detected.length} filaments to lab colors` : 'Color to route to'}</span>
+					<div class="mt-1 space-y-3">
+						{#each detected as f, i}
+							<div class="rounded-lg border border-warm-200 p-3">
+								<div class="mb-2 flex items-center gap-2 text-sm">
+									<span class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-warm-100 text-xs font-semibold text-muted-ink">{i + 1}</span>
+									{#if f.bakedHex}<span class="h-4 w-4 rounded border border-warm-300" style="background:{f.bakedHex}"></span>{/if}
+									<span class="text-muted-ink">Filament {i + 1} · {f.type}{f.bakedHex ? ` (${f.bakedHex})` : ''}</span>
+									<span class="ml-auto text-xs font-medium text-ink">→ {filamentColors[i]?.colorName ?? filamentColors[i]?.colorHex ?? 'pick'}</span>
+								</div>
+								<div class="flex flex-wrap gap-2">
+									{#each data.colors as c}
+										<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => (filamentColors[i] = c)}
+											class="relative h-8 w-8 rounded-lg border-2 transition-transform hover:scale-110 {filamentColors[i]?.colorHex === c.colorHex && filamentColors[i]?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+											{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
+										</button>
+									{/each}
+								</div>
+							</div>
 						{/each}
 					</div>
-				{/if}
-			</div>
-			<input type="hidden" name="colorHex" value={selected?.colorHex ?? '#FF5B14'} />
-			<input type="hidden" name="colorName" value={selected?.colorName ?? ''} />
-			<input type="hidden" name="filamentType" value={selected?.filamentType ?? 'PLA'} />
-			<button class="btn btn-primary w-full" disabled={submitting || !selected}>
+				</div>
+			{/if}
+			<input type="hidden" name="colorRequest" value={JSON.stringify(uploadColorRequest)} />
+			<input type="hidden" name="colorHex" value={filamentColors[0]?.colorHex ?? '#FF5B14'} />
+			<input type="hidden" name="filamentType" value={filamentColors[0]?.filamentType ?? 'PLA'} />
+			<button class="btn btn-primary w-full" disabled={submitting || !uploadReady}>
 				{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> Send sliced file to print{/if}
 			</button>
-			{#if !selected}<p class="text-center text-xs text-muted-ink">Pick a color so we can route it to a printer that has it.</p>{/if}
+			{#if detected.length && !uploadReady}<p class="text-center text-xs text-muted-ink">Pick a lab color for each filament.</p>{/if}
 		</form>
 		{/if}
 	{/if}
