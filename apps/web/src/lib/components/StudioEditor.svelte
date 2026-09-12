@@ -82,6 +82,111 @@
 		emitStats();
 	}
 
+	// ── Add 3D text ────────────────────────────────────────────────────────────
+	let textInput = $state('');
+	let toolPanel = $state<'none' | 'text' | 'bool' | 'cut'>('none');
+	let boolTarget = $state<string | null>(null);
+	let cutHeight = $state(10);
+	let fontCache: any = null;
+	export async function addText(str: string) {
+		if (!str.trim() || !THREE) return;
+		loading = true; errorMsg = null;
+		try {
+			if (!fontCache) {
+				const { FontLoader } = await import('three/addons/loaders/FontLoader.js');
+				const json = await (await fetch('/helvetiker.json')).json();
+				fontCache = new FontLoader().parse(json);
+			}
+			const { TextGeometry } = await import('three/addons/geometries/TextGeometry.js');
+			const g = new TextGeometry(str, { font: fontCache, size: 10, depth: 4, curveSegments: 4, bevelEnabled: false });
+			g.center();
+			if (typeof pushUndo === 'function') pushUndo();
+			addGeometry(g, str.slice(0, 24) || 'Text'); // lies flat, thickness up
+			toolPanel = 'none'; textInput = '';
+		} catch (e: any) { errorMsg = e?.message ?? 'Could not add text.'; } finally { loading = false; }
+	}
+
+	// ── Boolean (union / subtract / intersect) via three-bvh-csg ─────────────────
+	async function doBoolean(op: 'union' | 'subtract' | 'intersect') {
+		if (!selectedId || !boolTarget || selectedId === boolTarget) { errorMsg = 'Pick a second object.'; return; }
+		const a = meshes.get(selectedId), b = meshes.get(boolTarget);
+		if (!a || !b) return;
+		loading = true; errorMsg = null;
+		try {
+			const csg = await import('three-bvh-csg');
+			a.updateMatrixWorld(true); b.updateMatrixWorld(true);
+			const ba = new csg.Brush(a.geometry.clone().applyMatrix4(a.matrixWorld)); ba.updateMatrixWorld();
+			const bb = new csg.Brush(b.geometry.clone().applyMatrix4(b.matrixWorld)); bb.updateMatrixWorld();
+			const code = op === 'union' ? csg.ADDITION : op === 'subtract' ? csg.DIFFERENCE : csg.INTERSECTION;
+			const res = new csg.Evaluator().evaluate(ba, bb, code);
+			let geo = res.geometry; geo = geo.index ? geo.toNonIndexed() : geo;
+			geo.rotateX(Math.PI / 2); // result is display Y-up; addGeometry re-rotates from model Z-up
+			pushUndo();
+			removeObject(selectedId!); removeObject(boolTarget!); boolTarget = null;
+			addGeometry(geo, op === 'union' ? 'Union' : op === 'subtract' ? 'Difference' : 'Intersection');
+			toolPanel = 'none';
+		} catch (e: any) { errorMsg = e?.message ?? 'Boolean failed.'; } finally { loading = false; }
+	}
+
+	// ── Cut with a horizontal plane ──────────────────────────────────────────────
+	async function doCut(keep: 'top' | 'bottom' | 'both') {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		loading = true; errorMsg = null;
+		try {
+			const csg = await import('three-bvh-csg');
+			m.updateMatrixWorld(true);
+			const world = m.geometry.clone().applyMatrix4(m.matrixWorld);
+			const box = new THREE.Box3().setFromBufferAttribute(world.getAttribute('position'));
+			const size = new THREE.Vector3(); box.getSize(size); const ctr = new THREE.Vector3(); box.getCenter(ctr);
+			const y = box.min.y + cutHeight; // cut plane at cutHeight mm above the object's base
+			const big = Math.max(size.x, size.y, size.z) * 2 + 20;
+			const makeHalf = (below: boolean) => {
+				const h = big;
+				const bg = new THREE.BoxGeometry(big, h, big);
+				const brush = new csg.Brush(bg);
+				brush.position.set(ctr.x, y + (below ? -h / 2 : h / 2), ctr.z);
+				brush.updateMatrixWorld();
+				return brush;
+			};
+			const target = new csg.Brush(world.clone()); target.updateMatrixWorld();
+			const ev = new csg.Evaluator();
+			const results: { geo: any; name: string }[] = [];
+			if (keep === 'top' || keep === 'both') results.push({ geo: ev.evaluate(new csg.Brush(world.clone()), makeHalf(true), csg.DIFFERENCE).geometry, name: 'Top' });
+			if (keep === 'bottom' || keep === 'both') results.push({ geo: ev.evaluate(new csg.Brush(world.clone()), makeHalf(false), csg.DIFFERENCE).geometry, name: 'Bottom' });
+			void target;
+			pushUndo();
+			removeObject(selectedId!);
+			for (const r of results) { let g = r.geo.index ? r.geo.toNonIndexed() : r.geo; g.rotateX(Math.PI / 2); addGeometry(g, r.name); }
+			toolPanel = 'none';
+		} catch (e: any) { errorMsg = e?.message ?? 'Cut failed.'; } finally { loading = false; }
+	}
+
+	// ── Measure ──────────────────────────────────────────────────────────────────
+	let measuring = $state(false);
+	let measureDist = $state<number | null>(null);
+	let measurePts: any[] = [];
+	let measureLine: any = null;
+	function toggleMeasure() {
+		measuring = !measuring;
+		if (!measuring) clearMeasure();
+		else { applyMode('translate'); gizmo?.detach?.(); }
+	}
+	function clearMeasure() {
+		measurePts = []; measureDist = null;
+		if (measureLine) { scene.remove(measureLine); measureLine = null; }
+	}
+	function addMeasurePoint(p: any) {
+		if (measurePts.length >= 2) clearMeasure();
+		measurePts.push(p.clone());
+		if (measurePts.length === 2) {
+			measureDist = +measurePts[0].distanceTo(measurePts[1]).toFixed(2);
+			const geo = new THREE.BufferGeometry().setFromPoints(measurePts);
+			measureLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff5b14 }));
+			scene.add(measureLine);
+		}
+	}
+
 	let objects = $state<ObjRow[]>([]);
 	let selectedId = $state<string | null>(null);
 	let mode = $state<'translate' | 'rotate' | 'scale' | 'paint'>('translate');
@@ -526,6 +631,10 @@
 	function onPointerDown(ev: PointerEvent) {
 		if (gizmo?.dragging) return;
 		const hit = hitAt(ev);
+		if (measuring) {
+			if (hit?.point) addMeasurePoint(hit.point);
+			return;
+		}
 		if (mode === 'paint') {
 			if (hit?.object && hit.faceIndex != null) {
 				const m = hit.object;
@@ -701,9 +810,60 @@
 			<button type="button" title="Lay flat (L)" onclick={layFlatSelected} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="layers" size={18} /></button>
 			<button type="button" title="Auto-arrange (A)" onclick={arrange} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100"><Icon name="dashboard" size={18} /></button>
 			<span class="my-0.5 h-px w-full bg-warm-200"></span>
+			<button type="button" title="Add text" onclick={() => { toolPanel = toolPanel === 'text' ? 'none' : 'text'; }} class="flex h-9 w-9 items-center justify-center rounded-lg font-serif text-lg text-soft-ink hover:bg-warm-100 {toolPanel === 'text' ? 'bg-warm-100' : ''}">T</button>
+			<button type="button" title="Boolean (union / subtract / intersect)" onclick={() => { toolPanel = toolPanel === 'bool' ? 'none' : 'bool'; }} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100 {toolPanel === 'bool' ? 'bg-warm-100' : ''}"><Icon name="box" size={18} /></button>
+			<button type="button" title="Cut with a plane" onclick={() => { toolPanel = toolPanel === 'cut' ? 'none' : 'cut'; }} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100 {toolPanel === 'cut' ? 'bg-warm-100' : ''}"><Icon name="scale" size={18} /></button>
+			<button type="button" title="Measure" onclick={toggleMeasure} class="flex h-9 w-9 items-center justify-center rounded-lg text-soft-ink hover:bg-warm-100 {measuring ? 'bg-spark text-white' : ''}"><Icon name="sliders" size={18} /></button>
+			<span class="my-0.5 h-px w-full bg-warm-200"></span>
 			<button type="button" title="Undo (Ctrl+Z)" onclick={undo} class="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-soft-ink hover:bg-warm-100">↶</button>
 			<button type="button" title="Redo (Ctrl+Y)" onclick={redo} class="flex h-9 w-9 items-center justify-center rounded-lg text-lg text-soft-ink hover:bg-warm-100">↷</button>
 		</div>
+
+		<!-- Create / modify tool panels -->
+		{#if toolPanel === 'text'}
+			<div class="absolute left-16 top-1/2 w-64 -translate-y-1/2 rounded-xl border border-warm-200 bg-surface/95 p-3 text-xs shadow-lg backdrop-blur">
+				<p class="mb-2 font-semibold">Add text</p>
+				<input class="input mb-2 px-2 py-1.5 text-sm" placeholder="Type text…" bind:value={textInput} onkeydown={(e) => { if (e.key === 'Enter') addText(textInput); }} />
+				<button type="button" class="btn btn-primary btn-sm w-full" onclick={() => addText(textInput)}>Add to plate</button>
+			</div>
+		{:else if toolPanel === 'bool'}
+			<div class="absolute left-16 top-1/2 w-64 -translate-y-1/2 rounded-xl border border-warm-200 bg-surface/95 p-3 text-xs shadow-lg backdrop-blur">
+				<p class="mb-2 font-semibold">Boolean</p>
+				{#if !selected}<p class="text-muted-ink">Select the first object.</p>
+				{:else}
+					<p class="mb-1 text-muted-ink">{selected.name} <b>with</b>:</p>
+					<select class="select mb-2 px-2 py-1.5 text-sm" bind:value={boolTarget}>
+						<option value={null}>Choose object…</option>
+						{#each objects.filter((o) => o.id !== selectedId) as o}<option value={o.id}>{o.name}</option>{/each}
+					</select>
+					<div class="grid grid-cols-3 gap-1.5">
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doBoolean('union')}>Union</button>
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doBoolean('subtract')}>Subtract</button>
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doBoolean('intersect')}>Intersect</button>
+					</div>
+				{/if}
+			</div>
+		{:else if toolPanel === 'cut'}
+			<div class="absolute left-16 top-1/2 w-64 -translate-y-1/2 rounded-xl border border-warm-200 bg-surface/95 p-3 text-xs shadow-lg backdrop-blur">
+				<p class="mb-2 font-semibold">Cut with a plane</p>
+				{#if !selected}<p class="text-muted-ink">Select an object to cut.</p>
+				{:else}
+					<label class="mb-2 flex items-center gap-2">Height <input class="input px-2 py-1 text-sm" style="width:5rem" type="number" min="0" step="1" bind:value={cutHeight} /> mm</label>
+					<div class="grid grid-cols-3 gap-1.5">
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doCut('both')}>Split</button>
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doCut('top')}>Keep top</button>
+						<button type="button" class="rounded bg-warm-100 px-1 py-1.5 hover:bg-warm-200" onclick={() => doCut('bottom')}>Keep base</button>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		{#if measuring}
+			<div class="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-xl border border-warm-200 bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+				{#if measureDist != null}<span class="font-semibold text-spark-deep">{measureDist} mm</span> · click two points{:else}Click two points on the model to measure{/if}
+				<button type="button" class="ml-2 rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" onclick={clearMeasure}>Reset</button>
+			</div>
+		{/if}
 
 		<!-- Object list -->
 		<div class="absolute right-3 top-14 max-h-[55%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
