@@ -1,16 +1,33 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Icon from './Icon.svelte';
+	import { colorDistance } from '$lib/color';
+	import { build3MF, type Part } from '$lib/threemf';
 
 	type V3 = { x: number; y: number; z: number };
 	type Stats = { bbox: V3; volumeMm3: number; triangles: number; objects: number };
-	type ObjRow = { id: string; name: string };
+	type LabColor = { colorHex: string; colorName?: string | null; filamentType: string; available?: boolean };
+	type ObjRow = { id: string; name: string; color: LabColor };
 
 	let {
 		colorHex = '#FF5B14',
 		plate = { x: 256, y: 256, z: 256 },
+		labColors = [],
+		defaultColor = null,
 		onstats
-	}: { colorHex?: string; plate?: V3; onstats?: (s: Stats) => void } = $props();
+	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; onstats?: (s: Stats) => void } = $props();
+
+	const FALLBACK: LabColor = { colorHex, filamentType: 'PLA' };
+	function baseColor(): LabColor {
+		return defaultColor ?? labColors.find((c) => c.available) ?? labColors[0] ?? FALLBACK;
+	}
+	function nearestLab(hex: string): LabColor {
+		if (!labColors.length) return { colorHex: hex, filamentType: 'PLA' };
+		let best = labColors[0], bd = Infinity;
+		for (const c of labColors) { const d = colorDistance(hex, c.colorHex); if (d < bd) { bd = d; best = c; } }
+		return best;
+	}
+	let paletteOpenId = $state<string | null>(null);
 
 	let objects = $state<ObjRow[]>([]);
 	let selectedId = $state<string | null>(null);
@@ -76,20 +93,25 @@
 		m.position.y -= box.min.y; // sit on plate (y = 0)
 	}
 
-	function addGeometry(geometry: any, name: string) {
+	function addGeometry(geometry: any, name: string, srcHex?: string | null) {
 		let g = geometry.index ? geometry.toNonIndexed() : geometry;
 		g.rotateX(-Math.PI / 2); // model Z-up → three Y-up (display)
 		g.computeVertexNormals();
 		g.center();
 		const id = uid();
-		const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex), roughness: 0.5, metalness: 0.04 });
+		// Colors imported from the file (e.g. Fusion 3MF bodies) map to the nearest lab color and
+		// are treated as user-set so the default-color picker doesn't override them.
+		const custom = !!srcHex;
+		const color = srcHex ? nearestLab(srcHex) : baseColor();
+		const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color.colorHex), roughness: 0.5, metalness: 0.04 });
 		const m = new THREE.Mesh(g, mat);
 		m.castShadow = true;
 		m.userData.id = id;
+		m.userData.custom = custom;
 		scene.add(m);
 		dropToPlate(m);
 		meshes.set(id, m);
-		objects = [...objects, { id, name }];
+		objects = [...objects, { id, name, color }];
 		selectedId = id;
 		autoArrange();
 		frameCamera();
@@ -112,9 +134,22 @@
 				const o = new OBJLoader().parse(new TextDecoder().decode(buf));
 				o.traverse((c: any) => { if (c.isMesh && !geometry) geometry = c.geometry; });
 			} else if (ext === '3mf') {
+				// Fusion / Studio 3MFs can hold several colored bodies — import each as its own object
+				// so their colors come through (auto-mapped to your lab colors).
 				const { ThreeMFLoader } = await import('three/addons/loaders/3MFLoader.js');
 				const gg = new ThreeMFLoader().parse(buf);
-				gg.traverse((c: any) => { if (c.isMesh && !geometry) geometry = c.geometry; });
+				const parts: { geo: any; hex: string | null }[] = [];
+				gg.traverse((c: any) => {
+					if (c.isMesh && c.geometry?.getAttribute?.('position')) {
+						const col = c.material?.color ?? (Array.isArray(c.material) ? c.material[0]?.color : null);
+						parts.push({ geo: c.geometry, hex: col ? '#' + col.getHexString() : null });
+					}
+				});
+				if (!parts.length) throw new Error('No printable mesh found.');
+				if (typeof pushUndo === 'function') pushUndo();
+				const base = file.name.replace(/\.(stl|obj|3mf)$/i, '');
+				parts.forEach((p, i) => addGeometry(p.geo, parts.length > 1 ? `${base} ${i + 1}` : base, p.hex));
+				return;
 			} else throw new Error('Unsupported file. Use STL, OBJ, or 3MF.');
 			if (!geometry) throw new Error('No printable mesh found.');
 			if (typeof pushUndo === 'function') pushUndo();
@@ -258,18 +293,74 @@
 			gizmo.showY = m !== 'translate';
 		}
 	}
-	$effect(() => { for (const o of objects) { const m = meshes.get(o.id); if (m) m.material.color = new THREE.Color(colorHex); } void colorHex; });
 	$effect(() => { plate.x; plate.y; if (THREE && scene) buildPlate(); });
 
+	/** Recolor all objects that the user hasn't individually set (the single-color / default path). */
+	export function setDefaultColor(c: LabColor) {
+		for (const o of objects) {
+			const m = meshes.get(o.id);
+			if (m && !m.userData.custom) { m.material.color = new THREE.Color(c.colorHex); o.color = c; }
+		}
+		objects = [...objects];
+	}
+	/** Set one object's color (marks it user-set so the default picker won't override it). */
+	function setObjectColor(id: string, c: LabColor) {
+		const m = meshes.get(id);
+		if (m) { m.material.color = new THREE.Color(c.colorHex); m.userData.custom = true; }
+		objects = objects.map((o) => (o.id === id ? { ...o, color: c } : o));
+		paletteOpenId = null;
+	}
+	/** Distinct colors across all objects, first-seen order → the filament list. */
+	export function getColorRequest(): { filamentType: string; colorHex: string; colorName?: string }[] {
+		const out: { filamentType: string; colorHex: string; colorName?: string }[] = [];
+		for (const o of objects) {
+			if (!out.some((c) => c.colorHex === o.color.colorHex && c.filamentType === o.color.filamentType)) {
+				out.push({ filamentType: o.color.filamentType, colorHex: o.color.colorHex, colorName: o.color.colorName ?? undefined });
+			}
+		}
+		return out.length ? out : [{ filamentType: baseColor().filamentType, colorHex: baseColor().colorHex, colorName: baseColor().colorName ?? undefined }];
+	}
+	export function multicolor(): boolean {
+		return getColorRequest().length > 1;
+	}
+	/** Painted Bambu 3MF: each object's facets tagged with its color's filament index (0-based). */
+	export function exportPainted3MF(): Blob | null {
+		if (!objects.length) return null;
+		const palette = getColorRequest();
+		const idxOf = (o: ObjRow) => Math.max(0, palette.findIndex((c) => c.colorHex === o.color.colorHex && c.filamentType === o.color.filamentType));
+		const parts: Part[] = [];
+		for (const o of objects) {
+			const m = meshes.get(o.id);
+			if (!m) continue;
+			m.updateMatrixWorld(true);
+			const g = m.geometry.clone();
+			g.applyMatrix4(m.matrixWorld);
+			g.rotateX(Math.PI / 2); // Y-up display → Z-up for slicing
+			const ng = g.index ? g.toNonIndexed() : g;
+			const pos = ng.getAttribute('position').array as Float32Array;
+			const nTri = pos.length / 9;
+			const fil = idxOf(o);
+			parts.push({
+				positions: new Float32Array(pos),
+				support: new Uint8Array(nTri),
+				seam: new Uint8Array(nTri),
+				colorIndex: new Int16Array(nTri).fill(fil)
+			});
+		}
+		if (!parts.length) return null;
+		const bytes = build3MF(parts, palette.length);
+		return new Blob([bytes as BlobPart], { type: 'model/3mf' });
+	}
+
 	// ── Undo / redo + snapping ────────────────────────────────────────────────
-	type Snap = { id: string; name: string; geo: any; matrix: any; color: string };
+	type Snap = { id: string; name: string; geo: any; matrix: any; color: string; labColor: LabColor; custom: boolean };
 	let undoStack: Snap[][] = [];
 	let redoStack: Snap[][] = [];
 	let shiftDown = false;
 	let dragStartScale: any = null;
 
 	function snapshot(): Snap[] {
-		return objects.map((o) => { const m = meshes.get(o.id); m.updateMatrix(); return { id: o.id, name: o.name, geo: m.geometry, matrix: m.matrix.clone(), color: '#' + m.material.color.getHexString() }; });
+		return objects.map((o) => { const m = meshes.get(o.id); m.updateMatrix(); return { id: o.id, name: o.name, geo: m.geometry, matrix: m.matrix.clone(), color: '#' + m.material.color.getHexString(), labColor: o.color, custom: !!m.userData.custom }; });
 	}
 	function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 60) undoStack.shift(); redoStack = []; }
 	function restore(snap: Snap[]) {
@@ -278,9 +369,9 @@
 		for (const s of snap) {
 			let m = meshes.get(s.id);
 			if (!m) { m = new THREE.Mesh(s.geo, new THREE.MeshStandardMaterial({ color: new THREE.Color(s.color), roughness: 0.5, metalness: 0.04 })); m.castShadow = true; m.userData.id = s.id; scene.add(m); meshes.set(s.id, m); }
-			m.matrix.copy(s.matrix); m.matrix.decompose(m.position, m.quaternion, m.scale); m.material.color = new THREE.Color(s.color);
+			m.matrix.copy(s.matrix); m.matrix.decompose(m.position, m.quaternion, m.scale); m.material.color = new THREE.Color(s.color); m.userData.custom = s.custom;
 		}
-		objects = snap.map((s) => ({ id: s.id, name: s.name }));
+		objects = snap.map((s) => ({ id: s.id, name: s.name, color: s.labColor }));
 		if (selectedId && !keep.has(selectedId)) selectedId = objects[0]?.id ?? null;
 		select(selectedId);
 		emitStats();
@@ -427,13 +518,24 @@
 
 		<!-- Object list -->
 		<div class="absolute right-3 top-3 max-h-[45%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
-			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Objects</p>
+			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Objects{#if multicolor()} · multicolor{/if}</p>
 			{#each objects as o}
 				<div class="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs {o.id === selectedId ? 'bg-spark-soft text-spark-deep' : ''}">
+					{#if labColors.length}
+						<button type="button" title="Set color: {o.color.colorName ?? o.color.colorHex}" onclick={() => (paletteOpenId = paletteOpenId === o.id ? null : o.id)} class="h-4 w-4 shrink-0 rounded border border-warm-300" style="background:{o.color.colorHex}"></button>
+					{/if}
 					<button type="button" class="flex-1 truncate text-left hover:text-spark" onclick={() => select(o.id)}>{o.name}</button>
 					<button type="button" title="Duplicate (Ctrl+D)" class="text-muted-ink hover:text-ink" onclick={() => { select(o.id); duplicateSelected(); }}><Icon name="plus" size={13} /></button>
 					<button type="button" title="Delete (Del)" class="text-muted-ink hover:text-danger" onclick={() => removeObject(o.id)}><Icon name="trash" size={13} /></button>
 				</div>
+				{#if paletteOpenId === o.id && labColors.length}
+					<div class="mb-1 flex flex-wrap gap-1 rounded-lg bg-warm-50 p-1.5">
+						{#each labColors as c}
+							<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => setObjectColor(o.id, c)}
+								class="h-6 w-6 rounded border-2 hover:scale-110 {o.color.colorHex === c.colorHex && o.color.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}"></button>
+						{/each}
+					</div>
+				{/if}
 			{/each}
 		</div>
 

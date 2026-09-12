@@ -73,6 +73,12 @@
 	const hasModel = $derived((stats?.objects ?? 0) > 0);
 	const canSubmit = $derived(hasModel && !!selected && !!name);
 
+	// Keep un-recolored objects on the picked color (single-color path); per-object colors set in
+	// the editor's object list stay put.
+	$effect(() => {
+		if (selected) editor?.setDefaultColor?.(selected);
+	});
+
 	const QUALITY = [
 		{ label: 'Draft', h: 0.28 },
 		{ label: 'Standard', h: 0.2 },
@@ -130,8 +136,16 @@
 			use:enhance={({ formData, cancel }) => {
 				if (!canSubmit) { cancel(); return; }
 				submitting = true;
-				const stl = editor?.exportSTL?.();
-				if (stl) formData.set('file', stl, (name || 'model') + '.stl');
+				// Multicolor (different colors across objects) → painted 3MF + one filament per color.
+				const mc = editor?.multicolor?.() ?? false;
+				if (mc) {
+					const painted = editor?.exportPainted3MF?.();
+					if (painted) formData.set('file', painted, (name || 'model') + '.3mf');
+					formData.set('colorRequest', JSON.stringify(editor!.getColorRequest()));
+				} else {
+					const stl = editor?.exportSTL?.();
+					if (stl) formData.set('file', stl, (name || 'model') + '.stl');
+				}
 				formData.set('meta', JSON.stringify({ bbox: stats!.bbox, volumeMm3: stats!.volumeMm3, triangles: stats!.triangles }));
 				formData.set('colorHex', selected!.colorHex);
 				formData.set('colorName', selected!.colorName ?? '');
@@ -153,7 +167,7 @@
 			<div class="lg:col-span-8">
 				<div class="relative h-[440px] lg:h-[620px]" role="button" tabindex="0"
 					ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-					<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} {plate} onstats={(s) => (stats = s)} />
+					<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} {plate} onstats={(s) => (stats = s)} />
 					{#if !hasModel}
 						<button type="button" onclick={() => fileInput?.click()}
 							class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed {dragOver ? 'border-spark bg-spark-soft/50' : 'border-warm-300'} transition-colors">
