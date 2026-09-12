@@ -98,7 +98,7 @@
 
 <svelte:head><title>New print · SparkPrint</title></svelte:head>
 
-<div class="mx-auto max-w-7xl">
+<div class="mx-auto max-w-[104rem]">
 	<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
 		<div><h1 class="text-2xl font-semibold">New print</h1><p class="mt-1 text-sm text-soft-ink">Add your model, pick a color, and send it to the lab.</p></div>
 		{#if !form?.success}
@@ -165,7 +165,7 @@
 
 			<!-- Editor -->
 			<div class="lg:col-span-8">
-				<div class="relative h-[440px] lg:h-[620px]" role="button" tabindex="0"
+				<div class="relative h-[60vh] min-h-[420px] lg:h-[80vh]" role="button" tabindex="0"
 					ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
 					<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} {plate} onstats={(s) => (stats = s)} />
 					{#if !hasModel}

@@ -28,13 +28,14 @@
 		return best;
 	}
 	let paletteOpenId = $state<string | null>(null);
+	let fullscreen = $state(false);
 
 	let objects = $state<ObjRow[]>([]);
 	let selectedId = $state<string | null>(null);
 	let mode = $state<'translate' | 'rotate' | 'scale'>('translate');
 	let loading = $state(false);
 	let errorMsg = $state<string | null>(null);
-	let selInfo = $state<{ w: number; d: number; h: number; scalePct: number } | null>(null);
+	let selInfo = $state<{ w: number; d: number; h: number; scalePct: number; rx: number; ry: number; rz: number } | null>(null);
 
 	let container: HTMLDivElement;
 	let THREE: any, STLExporter: any;
@@ -229,11 +230,77 @@
 		dropToPlate(m); updateSelInfo(); emitStats();
 	}
 
+	// UI build axes → display axes (display is Y-up): X→x, Y→z, Z(up)→y.
+	const AX: Record<'x' | 'y' | 'z', 'x' | 'y' | 'z'> = { x: 'x', y: 'z', z: 'y' };
+
+	/** Resize the selected object so its build-axis dimension is `mm`, keeping proportions. */
+	function resizeTo(uiAxis: 'x' | 'y' | 'z', mm: number) {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m || !(mm > 0)) return;
+		const box = new THREE.Box3().setFromObject(m); const s = new THREE.Vector3(); box.getSize(s);
+		const cur = { x: s.x, y: s.z, z: s.y }[uiAxis]; // build dim
+		if (!(cur > 0)) return;
+		pushUndo();
+		const f = mm / cur;
+		m.scale.multiplyScalar(f);
+		dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function setScalePct(pct: number) {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m || !(pct > 0)) return;
+		pushUndo();
+		const f = pct / 100 / Math.abs(m.scale.x || 1);
+		m.scale.multiplyScalar(f);
+		dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function setRotation(uiAxis: 'x' | 'y' | 'z', deg: number) {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		pushUndo();
+		m.rotation[AX[uiAxis]] = (deg * Math.PI) / 180;
+		dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function rotate90(uiAxis: 'x' | 'y' | 'z') {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		pushUndo();
+		m.rotation[AX[uiAxis]] += Math.PI / 2;
+		dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function centerSelected() {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		pushUndo();
+		m.position.x = 0; m.position.z = 0; dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function fitToPlate() {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		const box = new THREE.Box3().setFromObject(m); const s = new THREE.Vector3(); box.getSize(s);
+		const f = Math.min((plate.x * 0.9) / s.x, (plate.y * 0.9) / s.z, (plate.z * 0.95) / s.y);
+		if (!(f > 0) || !isFinite(f)) return;
+		pushUndo();
+		m.scale.multiplyScalar(f);
+		m.position.x = 0; m.position.z = 0; dropToPlate(m); updateSelInfo(); emitStats();
+	}
+	function resetTransform() {
+		const m = selectedId && meshes.get(selectedId);
+		if (!m) return;
+		pushUndo();
+		m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1); m.position.x = 0; m.position.z = 0;
+		dropToPlate(m); updateSelInfo(); emitStats();
+	}
+
 	function updateSelInfo() {
 		const m = selectedId && meshes.get(selectedId);
 		if (!m) { selInfo = null; return; }
 		const box = new THREE.Box3().setFromObject(m); const s = new THREE.Vector3(); box.getSize(s);
-		selInfo = { w: +s.x.toFixed(1), d: +s.z.toFixed(1), h: +s.y.toFixed(1), scalePct: Math.round(Math.abs(m.scale.x) * 100) };
+		const deg = (r: number) => Math.round((((r * 180) / Math.PI) % 360 + 360) % 360);
+		selInfo = {
+			w: +s.x.toFixed(1), d: +s.z.toFixed(1), h: +s.y.toFixed(1),
+			scalePct: Math.round(Math.abs(m.scale.x) * 100),
+			rx: deg(m.rotation.x), ry: deg(m.rotation.z), rz: deg(m.rotation.y)
+		};
 	}
 	function emitStats() {
 		if (!objects.length) { onstats?.({ bbox: { x: 0, y: 0, z: 0 }, volumeMm3: 0, triangles: 0, objects: 0 }); return; }
@@ -411,7 +478,7 @@
 		else if (k === 'a') arrange();
 		else if (k === 'l') layFlatSelected();
 		else if (k === 'f') frameCamera();
-		else if (k === 'escape') select(null);
+		else if (k === 'escape') { if (fullscreen) fullscreen = false; else select(null); }
 		else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeSelected(); }
 		else return;
 	}
@@ -462,15 +529,19 @@
 				}
 			});
 			gizmo.addEventListener('objectChange', () => {
+				const m = selectedId ? meshes.get(selectedId) : null;
 				// Shift while scaling → uniform (scale the whole thing, not one side).
-				if (shiftDown && mode === 'scale' && dragStartScale && selectedId) {
-					const m = meshes.get(selectedId);
-					if (m) {
-						const rs = [m.scale.x / dragStartScale.x, m.scale.y / dragStartScale.y, m.scale.z / dragStartScale.z];
-						let r = 1, best = 0;
-						for (const c of rs) if (Math.abs(c - 1) > best) { best = Math.abs(c - 1); r = c; }
-						m.scale.set(dragStartScale.x * r, dragStartScale.y * r, dragStartScale.z * r);
-					}
+				if (shiftDown && mode === 'scale' && dragStartScale && m) {
+					const rs = [m.scale.x / dragStartScale.x, m.scale.y / dragStartScale.y, m.scale.z / dragStartScale.z];
+					let r = 1, best = 0;
+					for (const c of rs) if (Math.abs(c - 1) > best) { best = Math.abs(c - 1); r = c; }
+					m.scale.set(dragStartScale.x * r, dragStartScale.y * r, dragStartScale.z * r);
+				}
+				// Never let a part sink through the plate — keep its bottom on (or above) z=0.
+				if (m) {
+					m.updateMatrixWorld(true);
+					const minY = new THREE.Box3().setFromObject(m).min.y;
+					if (minY < 0) m.position.y -= minY;
 				}
 				updateSelInfo();
 			});
@@ -494,7 +565,10 @@
 	] as const;
 </script>
 
-<div class="relative h-full w-full overflow-hidden rounded-xl border border-warm-200 bg-soft-paper" bind:this={container}>
+<div class="{fullscreen ? 'fixed inset-0 z-[60]' : 'relative h-full w-full rounded-xl border border-warm-200'} overflow-hidden bg-soft-paper" bind:this={container}>
+	<button type="button" title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen'} onclick={() => (fullscreen = !fullscreen)} class="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-warm-200 bg-surface/95 text-soft-ink shadow-lg backdrop-blur hover:bg-warm-100">
+		<Icon name={fullscreen ? 'minimize' : 'maximize'} size={17} />
+	</button>
 	<div class="pointer-events-none absolute left-3 top-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[11px] font-medium text-soft-ink backdrop-blur">
 		{plate.x} × {plate.y} × {plate.z} mm{#if objects.length} · {objects.length} object{objects.length === 1 ? '' : 's'}{/if}
 	</div>
@@ -517,7 +591,7 @@
 		</div>
 
 		<!-- Object list -->
-		<div class="absolute right-3 top-3 max-h-[45%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
+		<div class="absolute right-3 top-14 max-h-[55%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
 			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Objects{#if multicolor()} · multicolor{/if}</p>
 			{#each objects as o}
 				<div class="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs {o.id === selectedId ? 'bg-spark-soft text-spark-deep' : ''}">
@@ -539,18 +613,45 @@
 			{/each}
 		</div>
 
-		<!-- Selected object info + mirror -->
+		<!-- Object manipulation panel (Bambu-style) -->
 		{#if selected && selInfo}
-			<div class="absolute bottom-3 left-16 rounded-xl border border-warm-200 bg-surface/95 px-3 py-2 text-ink shadow-lg backdrop-blur">
-				<div class="flex items-center gap-3 text-xs">
-					<span class="font-semibold">{selected.name}</span>
-					<span class="text-muted-ink">{selInfo.w} × {selInfo.d} × {selInfo.h} mm</span>
-					<span class="text-muted-ink">{selInfo.scalePct}%</span>
-					<span class="h-3 w-px bg-warm-200"></span>
-					<span class="text-muted-ink">Mirror</span>
-					{#each ['x', 'y', 'z'] as ax}
-						<button type="button" class="rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" onclick={() => mirrorSelected(ax as 'x')}>{ax.toUpperCase()}</button>
-					{/each}
+			<div class="absolute bottom-3 left-16 w-64 rounded-xl border border-warm-200 bg-surface/95 p-3 text-ink shadow-lg backdrop-blur">
+				<p class="mb-2 truncate text-xs font-semibold">{selected.name}</p>
+				<div class="space-y-2 text-[11px]">
+					<div>
+						<div class="mb-1 text-muted-ink">Size (mm)</div>
+						<div class="grid grid-cols-3 gap-1.5">
+							{#each [['x', selInfo.w], ['y', selInfo.d], ['z', selInfo.h]] as [ax, val]}
+								<label class="flex items-center gap-1"><span class="w-3 text-faint-ink uppercase">{ax}</span>
+									<input class="input px-1.5 py-1 text-[11px]" type="number" min="1" step="0.1" value={val} onchange={(e) => resizeTo(ax as 'x', +e.currentTarget.value)} /></label>
+							{/each}
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						<span class="text-muted-ink">Scale</span>
+						<input class="input px-1.5 py-1 text-[11px]" style="width:4rem" type="number" min="1" step="1" value={selInfo.scalePct} onchange={(e) => setScalePct(+e.currentTarget.value)} /><span class="text-faint-ink">%</span>
+						<button type="button" class="ml-auto rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" title="Scale to fill the plate" onclick={fitToPlate}>Fit</button>
+					</div>
+					<div>
+						<div class="mb-1 text-muted-ink">Rotate (°)</div>
+						<div class="grid grid-cols-3 gap-1.5">
+							{#each [['x', selInfo.rx], ['y', selInfo.ry], ['z', selInfo.rz]] as [ax, val]}
+								<label class="flex items-center gap-1"><span class="w-3 text-faint-ink uppercase">{ax}</span>
+									<input class="input px-1.5 py-1 text-[11px]" type="number" step="15" value={val} onchange={(e) => setRotation(ax as 'x', +e.currentTarget.value)} /></label>
+							{/each}
+						</div>
+					</div>
+					<div class="flex flex-wrap items-center gap-1 pt-0.5">
+						<span class="text-muted-ink">90°</span>
+						{#each ['x', 'y', 'z'] as ax}<button type="button" class="rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" onclick={() => rotate90(ax as 'x')}>{ax.toUpperCase()}</button>{/each}
+						<span class="ml-1 text-muted-ink">Mirror</span>
+						{#each ['x', 'y', 'z'] as ax}<button type="button" class="rounded bg-warm-100 px-1.5 py-0.5 hover:bg-warm-200" onclick={() => mirrorSelected(ax as 'x')}>{ax.toUpperCase()}</button>{/each}
+					</div>
+					<div class="flex gap-1.5 pt-0.5">
+						<button type="button" class="flex-1 rounded bg-warm-100 px-1.5 py-1 hover:bg-warm-200" onclick={centerSelected}>Center</button>
+						<button type="button" class="flex-1 rounded bg-warm-100 px-1.5 py-1 hover:bg-warm-200" onclick={layFlatSelected}>Lay flat</button>
+						<button type="button" class="flex-1 rounded bg-warm-100 px-1.5 py-1 hover:bg-warm-200" onclick={resetTransform}>Reset</button>
+					</div>
 				</div>
 			</div>
 		{/if}
