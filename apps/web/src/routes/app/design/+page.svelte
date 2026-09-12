@@ -2,12 +2,12 @@
 	import { enhance } from '$app/forms';
 	import { unzipSync, strFromU8 } from 'fflate';
 	import StudioEditor from '$lib/components/StudioEditor.svelte';
-	import FloatingPanel from '$lib/components/FloatingPanel.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import { colorDistance } from '$lib/color';
 	let { data, form } = $props();
 
-	let printOpen = $state(false); // the floating "Print" window
+	let printOpen = $state(true); // the docked print-settings panel
+	const PANEL_W = 340;
 
 	type LabColor = (typeof data.colors)[number];
 	let name = $state('');
@@ -109,7 +109,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded {plate} onstats={(s) => (stats = s)} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => (stats = s)} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
@@ -125,17 +125,20 @@
 		<span class="h-5 w-px bg-warm-200"></span>
 		<button type="button" class="btn btn-secondary btn-sm" onclick={() => fileInput?.click()}><Icon name="plus" size={14} /> Add model</button>
 		<button type="button" title="Show a pencil & paperclip beside the plate for scale" onclick={() => (showRef = !showRef)} class="btn btn-sm {showRef ? 'btn-primary' : 'btn-secondary'}"><Icon name="scale" size={14} /> Reference</button>
+		{#if !form?.success && !printOpen}
+			<button type="button" class="btn btn-primary btn-sm" onclick={() => (printOpen = true)}><Icon name="bolt" size={14} /> Print</button>
+		{/if}
 		{#if stats}<span class="hidden px-1 text-xs text-muted-ink sm:inline">{stats.bbox.x}×{stats.bbox.y}×{stats.bbox.z} mm</span>{/if}
 	</div>
 
-	<!-- Print now (opens the floating settings window) -->
-	{#if !form?.success && !printOpen}
-		<button type="button" onclick={() => (printOpen = true)} class="btn btn-primary btn-lg absolute bottom-5 right-5 z-30 shadow-lg"><Icon name="bolt" size={18} /> Print now</button>
-	{/if}
-
-	<!-- Print settings — draggable / snappable window -->
-	{#if !form?.success}
-		<FloatingPanel title="Print" icon="bolt" bind:open={printOpen} x={typeof window !== 'undefined' ? window.innerWidth - 400 : 900} y={70} w={370} h={560}>
+	<!-- Print settings — docked to the right edge (closeable, never blocks the plate) -->
+	{#if !form?.success && printOpen}
+		<aside class="absolute bottom-0 right-0 top-0 z-30 flex w-[340px] flex-col border-l border-warm-200 bg-surface/95 shadow-xl backdrop-blur">
+			<header class="flex items-center gap-2 border-b border-warm-200 px-4 py-3">
+				<Icon name="bolt" size={16} /><span class="flex-1 text-sm font-semibold text-ink">Print</span>
+				<button type="button" title="Hide" class="rounded p-1 text-muted-ink hover:bg-warm-100 hover:text-ink" onclick={() => (printOpen = false)}><Icon name="x" size={16} /></button>
+			</header>
+			<div class="min-h-0 flex-1 overflow-y-auto p-4">
 			{#if form?.error}<div class="mb-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{form.error}</div>{/if}
 			<div class="mb-3 inline-flex rounded-lg border border-warm-200 bg-warm-50 p-0.5 text-xs">
 				<button type="button" onclick={() => (mode = 'design')} class="rounded-md px-2.5 py-1 font-medium {mode === 'design' ? 'bg-spark-soft text-spark-deep' : 'text-muted-ink'}">This design</button>
@@ -264,7 +267,8 @@
 					{#if detected.length && !uploadReady}<p class="text-center text-xs text-muted-ink">Pick a lab color for each filament.</p>{/if}
 				</form>
 			{/if}
-		</FloatingPanel>
+			</div>
+		</aside>
 	{/if}
 
 	<!-- Success overlay -->

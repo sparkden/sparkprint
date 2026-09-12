@@ -16,8 +16,9 @@
 		defaultColor = null,
 		reference = false,
 		embedded = false,
+		insetRight = 0,
 		onstats
-	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; onstats?: (s: Stats) => void } = $props();
+	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; insetRight?: number; onstats?: (s: Stats) => void } = $props();
 
 	const FALLBACK: LabColor = { colorHex, filamentType: 'PLA' };
 	function baseColor(): LabColor {
@@ -915,7 +916,7 @@
 		{/if}
 
 		<!-- Object list -->
-		<div class="absolute right-3 top-14 max-h-[55%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur">
+		<div class="absolute top-14 max-h-[55%] w-52 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-2 text-ink shadow-lg backdrop-blur" style="right: calc(0.75rem + {insetRight}px)">
 			<p class="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Objects{#if multicolor()} · multicolor{/if}</p>
 			{#each objects as o}
 				<div class="flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs {o.id === selectedId ? 'bg-spark-soft text-spark-deep' : ''}">
@@ -981,7 +982,7 @@
 		{/if}
 
 		<!-- Shortcut hint -->
-		<div class="pointer-events-none absolute bottom-3 right-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[10px] text-muted-ink backdrop-blur">
+		<div class="pointer-events-none absolute bottom-3 rounded-md border border-warm-200 bg-surface/80 px-2 py-1 text-[10px] text-muted-ink backdrop-blur" style="right: calc(0.75rem + {insetRight}px)">
 			M/R/S move·rotate·scale · A arrange · L flat · Del delete · Ctrl+Z/Y undo/redo · Shift = snap / uniform
 		</div>
 	{/if}
