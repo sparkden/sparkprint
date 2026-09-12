@@ -39,9 +39,12 @@
 		const f = (e.target as HTMLInputElement).files?.[0];
 		detected = [];
 		filamentColors = [];
+		uploadPreview = null;
 		if (!f) return;
 		try {
-			const files = unzipSync(new Uint8Array(await f.arrayBuffer()));
+			const bytes = new Uint8Array(await f.arrayBuffer());
+			try { uploadPreview = previewFrom3mf(bytes); } catch { uploadPreview = null; }
+			const files = unzipSync(bytes);
 			const si = files['Metadata/slice_info.config'];
 			if (si) {
 				const xml = strFromU8(si);
@@ -67,6 +70,47 @@
 	let stats = $state<{ bbox: { x: number; y: number; z: number }; volumeMm3: number; triangles: number; objects: number } | null>(null);
 	let submitting = $state(false);
 
+	// ── Sliced preview shown before printing ──────────────────────────────────────
+	type Preview = { preslicedKey?: string; thumbnail: string | null; grams: number; timeSec: number; layers: number };
+	let preview = $state<Preview | null>(null); // design-mode slice result
+	let uploadPreview = $state<Preview | null>(null); // upload-mode file's own slice
+	let slicing = $state(false);
+	let sliceError = $state<string | null>(null);
+	let sliceNote = $state<string | null>(null);
+	/** Any design/geometry change makes the last slice stale. */
+	function invalidatePreview() { preview = null; sliceError = null; sliceNote = null; }
+
+	function fmtTime(sec: number): string {
+		if (!sec || sec < 0) return '—';
+		const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+		return h ? `${h}h ${m}m` : `${m}m`;
+	}
+	function fmtGrams(g: number): string { return g > 0 ? `${g.toFixed(g < 10 ? 1 : 0)} g` : '—'; }
+
+	/** Pull the rendered plate image + metrics out of a sliced .gcode.3mf, client-side. */
+	function previewFrom3mf(bytes: Uint8Array): Preview {
+		const files = unzipSync(bytes);
+		const names = Object.keys(files);
+		const pngName = names.find((n) => /^Metadata\/plate_\d+\.png$/i.test(n)) || names.find((n) => /\.png$/i.test(n) && !/_small/i.test(n));
+		let thumbnail: string | null = null;
+		if (pngName) {
+			const b = files[pngName]; let s = '';
+			for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+			thumbnail = 'data:image/png;base64,' + btoa(s);
+		}
+		let grams = 0, timeSec = 0, layers = 0;
+		const gName = names.find((n) => /^Metadata\/plate_\d+\.gcode$/i.test(n)) || names.find((n) => n.toLowerCase().endsWith('.gcode'));
+		if (gName) {
+			const raw = files[gName];
+			const head = strFromU8(raw.slice(0, 4000)) + '\n' + strFromU8(raw.slice(Math.max(0, raw.length - 4000)));
+			grams = parseFloat(/filament used\s*\[g\]\s*[:=]\s*([\d.]+)/i.exec(head)?.[1] ?? '') || 0;
+			const hms = /(?:model printing time|total estimated time|estimated printing time)\D*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?/i.exec(head);
+			if (hms) timeSec = +(hms[1] || 0) * 3600 + +(hms[2] || 0) * 60 + +(hms[3] || 0);
+			layers = parseInt(/(?:total layer number|total_layer_count|LAYER_COUNT)\s*[:=]\s*(\d+)/i.exec(head)?.[1] ?? '0', 10) || 0;
+		}
+		return { thumbnail, grams, timeSec, layers };
+	}
+
 	let editor: StudioEditor;
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let dragOver = $state(false);
@@ -74,6 +118,7 @@
 	// Default build plate (256³); auto-assigned later to whichever printer has the color.
 	const plate = { x: 256, y: 256, z: 256 };
 	const hasModel = $derived((stats?.objects ?? 0) > 0);
+	const canSlice = $derived(hasModel && !!selected);
 	const canSubmit = $derived(hasModel && !!selected && !!name);
 
 	// Keep un-recolored objects on the picked color (single-color path); per-object colors set in
@@ -109,7 +154,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => (stats = s)} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; invalidatePreview(); }} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
@@ -146,10 +191,10 @@
 			</div>
 
 			{#if mode === 'design'}
-				<form method="POST" action="?/submit" enctype="multipart/form-data"
-					use:enhance={({ formData, cancel }) => {
-						if (!canSubmit) { cancel(); return; }
-						submitting = true;
+				<form method="POST" action="?/slice" enctype="multipart/form-data"
+					use:enhance={({ formData, action, cancel }) => {
+						const isSlice = action.search.includes('slice');
+						if (isSlice ? !canSlice : !canSubmit) { cancel(); return; }
 						// Any paint (multicolor, support or seam) → painted 3MF + one filament per color.
 						const mc = (editor?.multicolor?.() ?? false) || (editor?.hasPaint?.() ?? false);
 						if (mc) {
@@ -167,11 +212,34 @@
 						formData.set('layerHeightMm', String(quality));
 						formData.set('infillPct', '15');
 						formData.set('supports', String(supports));
+						formData.set('raft', String(raft));
 						formData.set('copies', String(copies));
 						formData.set('printerModelTarget', 'auto');
 						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: 15, supports, raft, adhesion: raft ? 'raft' : 'none' }));
 						const thumb = editor?.captureThumbnail?.();
 						if (thumb) formData.set('thumbnail', thumb);
+
+						if (isSlice) {
+							slicing = true; sliceError = null; sliceNote = null;
+							return async ({ result }) => {
+								slicing = false;
+								if (result.type === 'success') {
+									const p = (result.data?.preview ?? null) as Preview | null;
+									preview = p;
+									sliceNote = p ? null : 'No slicer is set up here, so there’s no detailed preview — you can still send it to print.';
+								} else if (result.type === 'failure') {
+									sliceError = (result.data?.sliceError as string) ?? (result.data?.error as string) ?? 'Slicing failed.';
+								}
+								// keep the panel open; don't touch the page form state
+							};
+						}
+						// Send to print — reuse the file we just sliced for the preview.
+						submitting = true;
+						if (preview?.preslicedKey) {
+							formData.set('preslicedKey', preview.preslicedKey);
+							formData.set('preslicedGrams', String(preview.grams));
+							formData.set('preslicedTimeSec', String(preview.timeSec));
+						}
 						return async ({ update }) => { await update(); submitting = false; };
 					}}
 					class="space-y-4">
@@ -183,7 +251,7 @@
 						{:else}
 							<div class="flex flex-wrap gap-2">
 								{#each data.colors as c}
-									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => (selected = c)}
+									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => { selected = c; invalidatePreview(); }}
 										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
 										{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
 									</button>
@@ -196,22 +264,53 @@
 					<div>
 						<span class="label">Quality</span>
 						<div class="grid grid-cols-3 gap-1.5">
-							{#each QUALITY as q}<button type="button" onclick={() => (quality = q.h)} class="btn btn-sm {quality === q.h ? 'btn-primary' : 'btn-secondary'}">{q.label}</button>{/each}
+							{#each QUALITY as q}<button type="button" onclick={() => { quality = q.h; invalidatePreview(); }} class="btn btn-sm {quality === q.h ? 'btn-primary' : 'btn-secondary'}">{q.label}</button>{/each}
 						</div>
 						<p class="mt-1 text-xs text-muted-ink">Layer height {quality} mm</p>
 					</div>
 
-					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} class="h-4 w-4 rounded accent-[#FF5B14]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>
-					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={raft} class="h-4 w-4 rounded accent-[#FF5B14]" /> Raft <span class="text-xs font-normal text-muted-ink">— helps stick to the plate</span></label>
+					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#FF5B14]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>
+					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={raft} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#FF5B14]" /> Raft <span class="text-xs font-normal text-muted-ink">— helps stick to the plate</span></label>
 					<div><label class="label" for="cp">Copies</label><input class="input max-w-[6rem]" id="cp" name="copies" type="number" min="1" max="20" bind:value={copies} /></div>
 
 					<div class="space-y-3 border-t border-warm-200 pt-3">
+						{#if sliceError}<div class="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{sliceError}</div>{/if}
+
+						<!-- Sliced preview — the rendered plate + time / filament / layers, shown before printing -->
+						{#if preview}
+							<div class="overflow-hidden rounded-xl border border-warm-200">
+								{#if preview.thumbnail}
+									<img src={preview.thumbnail} alt="Sliced plate preview" class="block w-full bg-[#2b2b2b] object-contain" />
+								{:else}
+									<div class="flex h-28 items-center justify-center bg-warm-50 text-xs text-muted-ink">Sliced ✓</div>
+								{/if}
+								<div class="grid grid-cols-3 divide-x divide-warm-200 border-t border-warm-200 text-center">
+									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Time</div><div class="text-sm font-semibold text-ink">{fmtTime(preview.timeSec)}</div></div>
+									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Filament</div><div class="text-sm font-semibold text-ink">{fmtGrams(preview.grams)}</div></div>
+									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Layers</div><div class="text-sm font-semibold text-ink">{preview.layers || '—'}</div></div>
+								</div>
+							</div>
+						{:else if sliceNote}
+							<div class="rounded-lg bg-warm-50 px-3 py-2 text-xs text-muted-ink">{sliceNote}</div>
+						{/if}
+
 						{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A teacher approves before it prints.</div>{/if}
 						<div class="flex items-center justify-between text-sm"><span class="text-muted-ink">Quota left</span><span class="font-semibold text-ink">{data.usage.gramsRemaining ?? '∞'} g · {data.usage.jobsRemaining ?? '∞'} prints</span></div>
-						<button class="btn btn-primary w-full" disabled={!canSubmit || submitting}>
-							{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> {data.approvalMode ? 'Submit for approval' : 'Send to print'}{/if}
-						</button>
-						{#if !canSubmit}<p class="text-center text-xs text-muted-ink">Add a model, name, and color to continue.</p>{/if}
+
+						{#if preview || sliceNote}
+							<button type="submit" formaction="?/submit" class="btn btn-primary w-full" disabled={!canSubmit || submitting}>
+								{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> {data.approvalMode ? 'Submit for approval' : 'Send to print'}{/if}
+							</button>
+							<button type="submit" formaction="?/slice" class="btn btn-secondary btn-sm w-full" disabled={slicing}>
+								{#if slicing}Re-slicing…{:else}Re-slice{/if}
+							</button>
+							{#if !canSubmit}<p class="text-center text-xs text-muted-ink">Add a print name to send it.</p>{/if}
+						{:else}
+							<button type="submit" formaction="?/slice" class="btn btn-primary w-full" disabled={!canSlice || slicing}>
+								{#if slicing}Slicing…{:else}<Icon name="layers" size={16} /> Slice &amp; preview{/if}
+							</button>
+							{#if !canSlice}<p class="text-center text-xs text-muted-ink">Add a model and color to slice.</p>{/if}
+						{/if}
 					</div>
 				</form>
 			{:else}
@@ -224,6 +323,21 @@
 						<label class="label" for="uf">Sliced file (.gcode.3mf)</label>
 						<input class="input" id="uf" name="file" type="file" accept=".3mf,.gcode.3mf" required onchange={onSlicedFile} />
 					</div>
+
+					<!-- Preview baked into the sliced file -->
+					{#if uploadPreview}
+						<div class="overflow-hidden rounded-xl border border-warm-200">
+							{#if uploadPreview.thumbnail}
+								<img src={uploadPreview.thumbnail} alt="Sliced plate preview" class="block w-full bg-[#2b2b2b] object-contain" />
+							{/if}
+							<div class="grid grid-cols-3 divide-x divide-warm-200 {uploadPreview.thumbnail ? 'border-t border-warm-200' : ''} text-center">
+								<div class="px-1 py-2"><div class="text-xs text-muted-ink">Time</div><div class="text-sm font-semibold text-ink">{fmtTime(uploadPreview.timeSec)}</div></div>
+								<div class="px-1 py-2"><div class="text-xs text-muted-ink">Filament</div><div class="text-sm font-semibold text-ink">{fmtGrams(uploadPreview.grams)}</div></div>
+								<div class="px-1 py-2"><div class="text-xs text-muted-ink">Layers</div><div class="text-sm font-semibold text-ink">{uploadPreview.layers || '—'}</div></div>
+							</div>
+						</div>
+					{/if}
+
 					<div class="grid gap-4 sm:grid-cols-2">
 						<div><label class="label" for="un">Name</label><input class="input" id="un" name="name" placeholder="My print" /></div>
 						<div><label class="label" for="ucp">Copies</label><input class="input" id="ucp" name="copies" type="number" min="1" max="20" value="1" /></div>

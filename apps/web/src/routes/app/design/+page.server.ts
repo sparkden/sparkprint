@@ -4,9 +4,11 @@ import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { models, printers, amsUnits, amsSlots } from '$lib/server/db/schema';
 import { randomUUID } from 'node:crypto';
-import { putBuffer } from '$lib/server/storage';
+import { readFile } from 'node:fs/promises';
+import { putBuffer, objectFsPath, objectExists } from '$lib/server/storage';
 import { submitJob, CLOUD_PRINTABLE_MODELS } from '$lib/server/jobs';
-import { metricsFrom3mf, isSliced3mf } from '$lib/server/threemf-metrics';
+import { realSlice } from '$lib/server/slicer-cli';
+import { metricsFrom3mf, isSliced3mf, thumbnailFrom3mf } from '$lib/server/threemf-metrics';
 import { getUsage } from '$lib/server/quota';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -75,7 +77,88 @@ const metaSchema = z.object({
 	triangles: z.number().nonnegative()
 });
 
+const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional() });
+
 export const actions: Actions = {
+	// Slice the design now and return a preview (rendered plate image + time / filament / layers),
+	// WITHOUT queuing a print. The sliced file is stashed so "Send to print" reuses it as-is.
+	slice: async ({ request, locals }) => {
+		const user = locals.user!;
+		const fd = await request.formData();
+		const file = fd.get('file');
+		if (!(file instanceof File) || file.size === 0) return fail(400, { error: 'Please choose a model file.' });
+		if (file.size > 80 * 1024 * 1024) return fail(400, { error: 'Model is too large (80 MB max).' });
+
+		const parsed = z
+			.object({
+				layerHeightMm: z.coerce.number().min(0.06).max(0.4),
+				infillPct: z.coerce.number().int().min(0).max(100),
+				supports: z.coerce.boolean(),
+				raft: z.coerce.boolean().optional(),
+				printerModelTarget: z.preprocess((v) => (v && v !== 'auto' ? String(v) : null), z.string().nullable()),
+				colorRequest: z.string().optional()
+			})
+			.safeParse({
+				layerHeightMm: fd.get('layerHeightMm'),
+				infillPct: fd.get('infillPct'),
+				supports: fd.get('supports') === 'true',
+				raft: fd.get('raft') === 'true',
+				printerModelTarget: fd.get('printerModelTarget'),
+				colorRequest: fd.get('colorRequest') ?? undefined
+			});
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
+		const d = parsed.data;
+
+		// Filament types — one per requested color (multicolor via AMS).
+		let filamentTypes = ['PLA'];
+		if (d.colorRequest) {
+			let raw: unknown = null;
+			try { raw = JSON.parse(d.colorRequest); } catch { raw = null; }
+			const pc = z.array(colorItem).min(1).max(16).safeParse(raw);
+			if (pc.success) filamentTypes = pc.data.map((c) => c.filamentType || 'PLA');
+		}
+
+		const format = (file.name.split('.').pop() ?? 'stl').toLowerCase();
+		const buf = Buffer.from(await file.arrayBuffer());
+		const srcKey = `org/${user.orgId}/previews/${randomUUID()}.${format}`;
+		await putBuffer(srcKey, buf);
+
+		let out;
+		try {
+			out = await realSlice(objectFsPath(srcKey), {
+				layerHeightMm: d.layerHeightMm,
+				infillPct: d.infillPct,
+				supports: d.supports,
+				raft: d.raft,
+				printerModel: d.printerModelTarget ?? undefined,
+				filamentType: filamentTypes[0],
+				filamentTypes: filamentTypes.length > 1 ? filamentTypes : undefined
+			});
+		} catch (e) {
+			return fail(422, { sliceError: (e as Error).message || 'Slicing failed. Check the model and try again.' });
+		}
+
+		// No slicer configured, or it produced a non-Bambu file → no toolpath preview available.
+		if (!out || !out.gcodePath.endsWith('.3mf')) {
+			return { sliced: true as const, preview: null };
+		}
+
+		const gbuf = await readFile(out.gcodePath);
+		const preslicedKey = `org/${user.orgId}/previews/${randomUUID()}.gcode.3mf`;
+		await putBuffer(preslicedKey, gbuf);
+		const m = metricsFrom3mf(gbuf);
+		return {
+			sliced: true as const,
+			preview: {
+				preslicedKey,
+				thumbnail: thumbnailFrom3mf(gbuf),
+				grams: out.grams || m.grams,
+				timeSec: out.timeSec || m.timeSec,
+				layers: m.layers
+			}
+		};
+	},
+
 	submit: async ({ request, locals }) => {
 		const user = locals.user!;
 		const fd = await request.formData();
@@ -96,7 +179,11 @@ export const actions: Actions = {
 				copies: z.coerce.number().int().min(1).max(20),
 				printerModelTarget: z.preprocess((v) => (v && v !== 'auto' ? String(v) : null), z.string().nullable()),
 				process: z.string().optional(),
-				colorRequest: z.string().optional()
+				colorRequest: z.string().optional(),
+				// If the design was already sliced for preview, reuse that exact file (no re-slice).
+				preslicedKey: z.string().optional(),
+				preslicedGrams: z.coerce.number().optional(),
+				preslicedTimeSec: z.coerce.number().optional()
 			})
 			.safeParse({
 				name: fd.get('name'),
@@ -110,7 +197,10 @@ export const actions: Actions = {
 				copies: fd.get('copies'),
 				printerModelTarget: fd.get('printerModelTarget'),
 				process: fd.get('process') ?? undefined,
-				colorRequest: fd.get('colorRequest') ?? undefined
+				colorRequest: fd.get('colorRequest') ?? undefined,
+				preslicedKey: fd.get('preslicedKey') ?? undefined,
+				preslicedGrams: fd.get('preslicedGrams') ?? undefined,
+				preslicedTimeSec: fd.get('preslicedTimeSec') ?? undefined
 			});
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
 		const d = parsed.data;
@@ -158,7 +248,6 @@ export const actions: Actions = {
 		}
 
 		// Color request: multi-color from the painted filament list, else the single picked color.
-		const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional() });
 		let colorRequest: { filamentType: string; colorHex: string; colorName?: string }[] = [
 			{ filamentType: d.filamentType, colorHex: d.colorHex, colorName: d.colorName }
 		];
@@ -168,6 +257,10 @@ export const actions: Actions = {
 			const parsedColors = z.array(colorItem).min(1).max(16).safeParse(raw);
 			if (parsedColors.success) colorRequest = parsedColors.data;
 		}
+
+		// Reuse the file sliced for the preview (same org, still present) so the print matches exactly
+		// what the student saw — no second slice.
+		const reuse = d.preslicedKey && d.preslicedKey.startsWith(`org/${user.orgId}/previews/`) && objectExists(d.preslicedKey);
 
 		const result = await submitJob({
 			orgId: user.orgId,
@@ -180,7 +273,10 @@ export const actions: Actions = {
 			supports: d.supports,
 			copies: d.copies,
 			printerModelTarget: d.printerModelTarget,
-			process
+			process,
+			...(reuse
+				? { preslicedKey: d.preslicedKey, preslicedGrams: d.preslicedGrams ?? 0, preslicedTimeSec: d.preslicedTimeSec ?? 0 }
+				: {})
 		});
 
 		if (!result.ok) return fail(400, { error: result.error });
