@@ -43,9 +43,10 @@ export const actions: Actions = {
 		let userId: string;
 		let isOwner = false;
 		try {
-			userId = await db.transaction(async (tx) => {
+			// better-sqlite3 transactions are synchronous (no async callback / await inside).
+			userId = db.transaction((tx) => {
 				// Re-check inside the transaction so two simultaneous first signups can't both create a lab.
-				const [existingOrg] = await tx.select().from(orgs).limit(1);
+				const existingOrg = tx.select().from(orgs).limit(1).get();
 				let orgId: string;
 				let role: 'owner' | 'student';
 				if (existingOrg) {
@@ -53,12 +54,12 @@ export const actions: Actions = {
 					role = 'student';
 				} else {
 					const slug = slugify(schoolName ?? 'lab') || 'lab';
-					const [org] = await tx.insert(orgs).values({ name: schoolName ?? 'SparkPrint Lab', slug }).returning();
+					const org = tx.insert(orgs).values({ name: schoolName ?? 'SparkPrint Lab', slug }).returning().get()!;
 					orgId = org.id;
 					role = 'owner';
 					isOwner = true;
 				}
-				const [user] = await tx.insert(users).values({ orgId, email, name, passwordHash, role, status: 'active' }).returning();
+				const user = tx.insert(users).values({ orgId, email, name, passwordHash, role, status: 'active' }).returning().get()!;
 				return user.id;
 			});
 		} catch {

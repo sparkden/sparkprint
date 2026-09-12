@@ -173,9 +173,9 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			return 'queued';
 		}
 
-		await db.transaction(async (tx) => {
-			await tx.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'sending', startedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-			await tx.update(printers).set({ currentJobId: jobId, updatedAt: new Date() }).where(eq(printers.id, p.id));
+		db.transaction((tx) => {
+			tx.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'sending', startedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId)).run();
+			tx.update(printers).set({ currentJobId: jobId, updatedAt: new Date() }).where(eq(printers.id, p.id)).run();
 		});
 		await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });
 		return 'printing';
@@ -359,16 +359,16 @@ export async function cancelJob(jobId: string, orgId: string, actorId: string) {
 	if (['completed', 'canceled', 'rejected', 'failed'].includes(job.status))
 		return { ok: false, error: 'Job already finished' };
 
-	await db.transaction(async (tx) => {
-		await tx
-			.update(printJobs)
+	db.transaction((tx) => {
+		tx.update(printJobs)
 			.set({ status: 'canceled', finishedAt: new Date(), updatedAt: new Date() })
-			.where(eq(printJobs.id, jobId));
+			.where(eq(printJobs.id, jobId))
+			.run();
 		if (job.printerId) {
-			await tx
-				.update(printers)
+			tx.update(printers)
 				.set({ status: 'idle', currentJobId: null, progressPct: null, updatedAt: new Date() })
-				.where(eq(printers.id, job.printerId));
+				.where(eq(printers.id, job.printerId))
+				.run();
 		}
 	});
 	await logEvent(jobId, 'status_change', 'Canceled', {}, actorId);
@@ -379,21 +379,21 @@ export async function cancelJob(jobId: string, orgId: string, actorId: string) {
 export async function completeJob(jobId: string, actualGrams?: number) {
 	const [job] = await db.select().from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
 	if (!job) return;
-	await db.transaction(async (tx) => {
-		await tx
-			.update(printJobs)
+	db.transaction((tx) => {
+		tx.update(printJobs)
 			.set({
 				status: 'completed',
 				actualGrams: actualGrams != null ? actualGrams.toFixed(2) : job.estimatedGrams,
 				finishedAt: new Date(),
 				updatedAt: new Date()
 			})
-			.where(eq(printJobs.id, jobId));
+			.where(eq(printJobs.id, jobId))
+			.run();
 		if (job.printerId) {
-			await tx
-				.update(printers)
+			tx.update(printers)
 				.set({ status: 'finished', currentJobId: null, progressPct: 100, updatedAt: new Date() })
-				.where(eq(printers.id, job.printerId));
+				.where(eq(printers.id, job.printerId))
+				.run();
 		}
 	});
 	await logEvent(jobId, 'status_change', 'Completed');

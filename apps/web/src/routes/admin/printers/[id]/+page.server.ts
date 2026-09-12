@@ -99,10 +99,10 @@ export const actions: Actions = {
 		if (!printer) return fail(404, { error: 'Printer not found' });
 		const existing = await db.select({ amsIndex: amsUnits.amsIndex }).from(amsUnits).where(eq(amsUnits.printerId, printer.id));
 		const nextIndex = existing.length ? Math.max(...existing.map((u) => u.amsIndex)) + 1 : 0;
-		await db.transaction(async (tx) => {
-			const [unit] = await tx.insert(amsUnits).values({ printerId: printer.id, amsIndex: nextIndex }).returning();
-			for (let s = 0; s < 4; s++) await tx.insert(amsSlots).values({ amsUnitId: unit.id, printerId: printer.id, slotIndex: s, empty: true });
-			await tx.update(printers).set({ hasAms: true, updatedAt: new Date() }).where(eq(printers.id, printer.id));
+		db.transaction((tx) => {
+			const unit = tx.insert(amsUnits).values({ printerId: printer.id, amsIndex: nextIndex }).returning().get()!;
+			for (let s = 0; s < 4; s++) tx.insert(amsSlots).values({ amsUnitId: unit.id, printerId: printer.id, slotIndex: s, empty: true }).run();
+			tx.update(printers).set({ hasAms: true, updatedAt: new Date() }).where(eq(printers.id, printer.id)).run();
 		});
 		return { success: true, message: `Added AMS ${nextIndex + 1}.` };
 	},

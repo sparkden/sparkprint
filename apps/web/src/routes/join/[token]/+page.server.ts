@@ -66,8 +66,8 @@ export const actions: Actions = {
 		const passwordHash = await hashPassword(password);
 		let userId: string;
 		try {
-			userId = await db.transaction(async (tx) => {
-				const [u] = await tx
+			userId = db.transaction((tx) => {
+				const u = tx
 					.insert(users)
 					.values({
 						orgId: row.invite.orgId,
@@ -79,11 +79,12 @@ export const actions: Actions = {
 						monthlyGramLimit: row.invite.monthlyGramLimit,
 						monthlyJobLimit: row.invite.monthlyJobLimit
 					})
-					.returning();
-				await tx
-					.update(invites)
+					.returning()
+					.get()!;
+				tx.update(invites)
 					.set({ uses: sql`${invites.uses} + 1` })
-					.where(eq(invites.id, row.invite.id));
+					.where(eq(invites.id, row.invite.id))
+					.run();
 				return u.id;
 			});
 		} catch {
