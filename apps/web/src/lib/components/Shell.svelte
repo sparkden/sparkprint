@@ -4,16 +4,14 @@
 	import Icon from './Icon.svelte';
 	import type { Snippet } from 'svelte';
 
-	type NavItem = { label: string; href: string; icon: string; badge?: number };
+	type NavItem = { label: string; href: string; icon: string; badge?: number; section?: string };
 	let {
 		nav,
 		user,
-		area = 'app',
 		children
 	}: {
 		nav: NavItem[];
 		user: { name: string; role: string; orgName: string };
-		area?: 'app' | 'admin';
 		children: Snippet;
 	} = $props();
 
@@ -46,6 +44,9 @@
 		</div>
 		<nav class="flex flex-col gap-0.5 p-3">
 			{#each nav as item}
+				{#if item.section}
+					<p class="mb-1 mt-4 px-3 text-[0.7rem] font-semibold uppercase tracking-wider text-faint-ink">{item.section}</p>
+				{/if}
 				<a
 					href={item.href}
 					onclick={() => (mobileOpen = false)}
@@ -66,18 +67,6 @@
 				</a>
 			{/each}
 		</nav>
-
-		{#if isStaff}
-			<div class="mx-3 mt-2 border-t border-warm-200 pt-3">
-				<a
-					href={area === 'admin' ? '/app' : '/admin'}
-					class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-ink hover:bg-warm-100"
-				>
-					<Icon name={area === 'admin' ? 'palette' : 'settings'} size={18} />
-					{area === 'admin' ? 'Student view' : 'Admin console'}
-				</a>
-			</div>
-		{/if}
 	</aside>
 
 	{#if mobileOpen}

@@ -35,6 +35,7 @@ export const JOB_STATUS_VALUES = [
 	'sending',
 	'printing',
 	'paused',
+	'awaiting_pickup', // print done, still on the bed — must be checked out to free the printer
 	'completed',
 	'failed',
 	'canceled'

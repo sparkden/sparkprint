@@ -8,8 +8,9 @@
 	const job = $derived(data.job);
 	const color = $derived((job.colorRequest ?? [])[0]);
 	const meta = $derived(JOB_STATUS_META[job.status] ?? { label: job.status, badge: 'badge-neutral' });
-	const canCancel = $derived(!['completed', 'canceled', 'rejected', 'failed'].includes(job.status));
+	const canCancel = $derived(!['completed', 'canceled', 'rejected', 'failed', 'awaiting_pickup'].includes(job.status));
 	const active = $derived(['printing', 'sending'].includes(job.status));
+	const awaitingPickup = $derived(job.status === 'awaiting_pickup');
 </script>
 
 <svelte:head><title>{job.name} · SparkPrint</title></svelte:head>
@@ -63,6 +64,16 @@
 				</div>
 			{/if}
 
+			{#if awaitingPickup}
+				<div class="mt-5 rounded-xl border border-warning/30 bg-warning/10 p-4">
+					<p class="text-sm font-semibold text-[#9c5a00]">Done printing on {data.printerName} — grab it off the bed 🎉</p>
+					<p class="mt-1 text-xs text-[#9c5a00]/90">The printer stays reserved until you check the print out, so no one prints on top of it.</p>
+					<form method="POST" action="?/checkout" use:enhance class="mt-3">
+						<button class="btn btn-primary btn-sm"><Icon name="check" size={15} /> I picked it up — check out</button>
+					</form>
+				</div>
+			{/if}
+
 			{#if job.status === 'rejected' && job.approvalNote}
 				<div class="mt-5 rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
 					<span class="font-semibold">Rejected:</span> {job.approvalNote}
@@ -77,7 +88,7 @@
 				{/if}
 				{#if data.isStaff && active}
 					<form method="POST" action="?/complete" use:enhance>
-						<button class="btn btn-ghost btn-sm" title="Mark finished (demo)"><Icon name="check" size={15} /> Mark complete</button>
+						<button class="btn btn-ghost btn-sm" title="Mark the print finished"><Icon name="check" size={15} /> Mark finished</button>
 					</form>
 				{/if}
 			</div>

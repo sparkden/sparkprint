@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from './db';
 import {
 	printJobs,
@@ -96,7 +96,9 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				eq(printers.orgId, job.orgId),
 				eq(printers.enabled, true),
 				eq(printers.online, true),
-				inArray(printers.status, ['idle', 'finished'])
+				// Only genuinely free printers — a 'finished' printer still has a print on the bed
+				// awaiting pickup and must be checked out before it can be reused.
+				eq(printers.status, 'idle')
 			)
 		)
 		.orderBy(desc(printers.priority), asc(printers.name));
@@ -376,13 +378,18 @@ export async function cancelJob(jobId: string, orgId: string, actorId: string) {
 }
 
 /** Called when a printer finishes (mock: manual complete, or bridge telemetry). */
+/**
+ * Print finished on the machine. The plate is still physically on the bed, so the printer is NOT
+ * freed and the queue is NOT advanced — the job goes to `awaiting_pickup` until someone checks it
+ * out (confirming the print was removed). This is what makes the printer available again.
+ */
 export async function completeJob(jobId: string, actualGrams?: number) {
 	const [job] = await db.select().from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
-	if (!job) return;
+	if (!job || ['awaiting_pickup', 'completed', 'canceled'].includes(job.status)) return;
 	db.transaction((tx) => {
 		tx.update(printJobs)
 			.set({
-				status: 'completed',
+				status: 'awaiting_pickup',
 				actualGrams: actualGrams != null ? actualGrams.toFixed(2) : job.estimatedGrams,
 				finishedAt: new Date(),
 				updatedAt: new Date()
@@ -390,15 +397,36 @@ export async function completeJob(jobId: string, actualGrams?: number) {
 			.where(eq(printJobs.id, jobId))
 			.run();
 		if (job.printerId) {
+			// 'finished' = done but still occupied (awaiting pickup); stays until checkout.
 			tx.update(printers)
-				.set({ status: 'finished', currentJobId: null, progressPct: 100, updatedAt: new Date() })
+				.set({ status: 'finished', progressPct: 100, updatedAt: new Date() })
 				.where(eq(printers.id, job.printerId))
 				.run();
 		}
 	});
-	await logEvent(jobId, 'status_change', 'Completed');
-	// Try to pull the next queued job onto the freed printer.
-	if (job.printerId) await promoteQueue(job.orgId);
+	await logEvent(jobId, 'status_change', 'Print finished — awaiting pickup');
+}
+
+/**
+ * A finished print was physically removed from the bed. Marks the job completed, frees the printer,
+ * and pulls the next queued job onto it. Callable by the job's owner or any staff member.
+ */
+export async function checkoutJob(jobId: string, orgId: string, actorId?: string): Promise<{ ok: boolean; error?: string }> {
+	const [job] = await db.select().from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, orgId))).limit(1);
+	if (!job) return { ok: false, error: 'Print not found' };
+	if (job.status !== 'awaiting_pickup') return { ok: false, error: 'This print isn’t awaiting pickup' };
+	db.transaction((tx) => {
+		tx.update(printJobs).set({ status: 'completed', updatedAt: new Date() }).where(eq(printJobs.id, jobId)).run();
+		if (job.printerId) {
+			tx.update(printers)
+				.set({ status: 'idle', currentJobId: null, progressPct: null, updatedAt: new Date() })
+				.where(eq(printers.id, job.printerId))
+				.run();
+		}
+	});
+	await logEvent(jobId, 'status_change', 'Checked out — printer freed', {}, actorId);
+	if (job.printerId) await promoteQueue(orgId);
+	return { ok: true };
 }
 
 /** After a printer frees up, try to dispatch the oldest queued job. */

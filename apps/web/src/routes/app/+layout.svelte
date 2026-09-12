@@ -1,15 +1,10 @@
 <script lang="ts">
 	import Shell from '$lib/components/Shell.svelte';
+	import { buildNav } from '$lib/nav';
 	let { data, children } = $props();
-
-	const nav = [
-		{ label: 'Home', href: '/app', icon: 'dashboard' },
-		{ label: 'New print', href: '/app/design', icon: 'palette' },
-		{ label: 'My prints', href: '/app/jobs', icon: 'layers' },
-		{ label: 'Printers', href: '/app/printers', icon: 'printer' }
-	];
+	const nav = $derived(buildNav(data.user.role, { pendingApprovals: data.pendingApprovals }));
 </script>
 
-<Shell {nav} user={data.user} area="app">
+<Shell {nav} user={data.user}>
 	{@render children()}
 </Shell>

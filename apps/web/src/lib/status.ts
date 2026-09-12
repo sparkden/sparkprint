@@ -13,6 +13,7 @@ export const JOB_STATUS_META: Record<
 	sending: { label: 'Sending', badge: 'badge-info', tone: '#2b5896' },
 	printing: { label: 'Printing', badge: 'badge-spark', tone: '#e0470a' },
 	paused: { label: 'Paused', badge: 'badge-warning', tone: '#a35f00' },
+	awaiting_pickup: { label: 'Awaiting pickup', badge: 'badge-warning', tone: '#a35f00' },
 	completed: { label: 'Completed', badge: 'badge-success', tone: '#327a27' },
 	failed: { label: 'Failed', badge: 'badge-danger', tone: '#b23a25' },
 	canceled: { label: 'Canceled', badge: 'badge-neutral', tone: '#8a7e72' }
@@ -24,7 +25,7 @@ export const PRINTER_STATUS_META: Record<string, { label: string; badge: string 
 	printing: { label: 'Printing', badge: 'badge-spark' },
 	paused: { label: 'Paused', badge: 'badge-warning' },
 	error: { label: 'Error', badge: 'badge-danger' },
-	finished: { label: 'Finished', badge: 'badge-info' }
+	finished: { label: 'Awaiting pickup', badge: 'badge-warning' }
 };
 
 export function fmtGrams(g: number | string | null | undefined): string {
