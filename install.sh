@@ -170,12 +170,15 @@ ok "Using a local SQLite database ($APP_DIR/apps/web/.data/sparkprint.db)."
 step "5/9  OrcaSlicer (slicing engine → real Bambu G-code + sliced previews)"
 ORCA_DIR="$APP_DIR/slicers/orca"
 ORCA_APPRUN="$ORCA_DIR/squashfs-root/AppRun"
-GLIBC_OK=0
-[ "$(printf '%s\n2.39\n' "$GLIBC" | sort -V | head -1)" = "2.39" ] && GLIBC_OK=1
+# glibc ≥ 2.39 is needed to RUN the AppImage. We don't use this to block the download (a false
+# reading was wrongly skipping OrcaSlicer on modern systems) — only to give a helpful hint if the
+# smoke test later fails. The smoke test is the real arbiter of whether OrcaSlicer runs here.
+GLIBC_OLD=0
+[ "$(printf '%s\n2.39\n' "$GLIBC" | sort -V | head -1)" != "2.39" ] && GLIBC_OLD=1
 
-# Find the newest OrcaSlicer Linux AppImage that matches this machine's arch + glibc.
-# Uses the GitHub releases API (no hardcoded filenames, so it survives version bumps). Prints
-# a download URL on success; nothing on failure. Honours an explicit ORCA_VERSION pin.
+# Find the newest STABLE OrcaSlicer Linux AppImage for this machine's arch. Uses the GitHub
+# releases API (no hardcoded filenames, so it survives version bumps). Prints a download URL on
+# success; nothing on failure. Honours an explicit ORCA_VERSION pin.
 resolve_orca_url() {
   local api="https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases?per_page=40"
   local all; all="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api" 2>/dev/null | grep -oE 'https://[^"]+\.AppImage' || true)"
@@ -191,11 +194,6 @@ resolve_orca_url() {
     local pinned; pinned="$(printf '%s\n' "$all" | grep -E "/v?${ORCA_VERSION}/" || true)"
     [ -n "$pinned" ] && all="$pinned"
   fi
-  # On older glibc (< 2.39) prefer an Ubuntu 22.04 build; only use a 24.04 build if nothing else.
-  if [ "$GLIBC_OK" -ne 1 ]; then
-    local u22; u22="$(printf '%s\n' "$all" | grep -Ei 'ubuntu.?22' || true)"
-    if [ -n "$u22" ]; then all="$u22"; else return 2; fi   # 2 = only-incompatible-builds-exist
-  fi
   printf '%s\n' "$all" | head -1
 }
 
@@ -203,18 +201,13 @@ if [ -x "$ORCA_APPRUN" ]; then
   ok "OrcaSlicer already installed."
 else
   mkdir -p "$ORCA_DIR"
-  echo "  Finding a compatible OrcaSlicer build (arch $ARCH, glibc $GLIBC)…"
-  set +e; URL="$(resolve_orca_url)"; RESOLVE_RC=$?; set -e
+  echo "  Finding the newest OrcaSlicer build for $ARCH…"
+  set +e; URL="$(resolve_orca_url)"; set -e
   if [ -z "$URL" ]; then
-    if [ "$RESOLVE_RC" = 2 ]; then
-      warn "This OS has glibc $GLIBC, but OrcaSlicer only ships glibc≥2.39 builds for $ARCH."
-      warn "Use Raspberry Pi OS 'Trixie' (64-bit) or newer for real Bambu G-code + sliced previews."
-    else
-      warn "Couldn't reach the OrcaSlicer release list (offline or rate-limited)."
-    fi
-    warn "Slicing will fall back to the bundled Slic3r (no sliced preview, non-Bambu G-code)."
+    warn "Couldn't reach the OrcaSlicer release list (offline or GitHub rate-limited)."
+    warn "Re-run the installer later to fetch it; slicing falls back to Slic3r until then."
   else
-    echo "  Downloading $(basename "$URL")…"
+    echo "  Downloading $(basename "$URL") (~135 MB)…"
     if curl -fSL "$URL" -o "$ORCA_DIR/orca.AppImage"; then
       chmod +x "$ORCA_DIR/orca.AppImage"
       # Extract (AppImages can't FUSE-mount headless) → squashfs-root/AppRun is what the app calls.
@@ -239,7 +232,8 @@ if [ -x "$ORCA_APPRUN" ]; then
     ORCA_WORKS=1; ok "OrcaSlicer runs headless — sliced previews are enabled."
   else
     warn "OrcaSlicer is installed but didn't start headless (missing library, GL, or timed out)."
-    [ -s "$SMOKE" ] && warn "  $(grep -i 'shared librar\|shared object' "$SMOKE" | head -1)"
+    [ -s "$SMOKE" ] && warn "  $(grep -i 'shared librar\|shared object\|GLIBC' "$SMOKE" | head -1)"
+    [ "$GLIBC_OLD" = 1 ] && warn "  This OS has glibc $GLIBC (< 2.39) — use Raspberry Pi OS 'Trixie' (64-bit) or newer."
     warn "The app will fall back to Slic3r (no sliced preview). Logs: journalctl -u sparkprint -e"
   fi
   rm -f "$SMOKE"
