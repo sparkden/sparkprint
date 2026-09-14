@@ -382,7 +382,11 @@ EOF
       cloudflared service install >/dev/null 2>&1 || true
       systemctl enable --now cloudflared >/dev/null 2>&1 || true
       # Point the app at its public origin (CSRF / absolute URLs) and restart.
-      sed -i "s#^ORIGIN=.*#ORIGIN=\"https://$HOSTNAME\"#" "$ENV_FILE"
+      if grep -q '^ORIGIN=' "$ENV_FILE"; then
+        sed -i "s#^ORIGIN=.*#ORIGIN=\"https://$HOSTNAME\"#" "$ENV_FILE"
+      else
+        echo "ORIGIN=\"https://$HOSTNAME\"" >> "$ENV_FILE"
+      fi
       systemctl restart sparkprint
       ok "Tunnel live: https://$HOSTNAME  (DNS may take a minute to propagate)"
     else

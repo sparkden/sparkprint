@@ -7,4 +7,7 @@ cd "$APP_DIR"
 set -a
 [ -f apps/web/.env ] && . apps/web/.env
 set +a
+# adapter-node rejects an empty ORIGIN ("Invalid ORIGIN: ''"); only pass it when it's a real URL.
+# Empty means LAN-only, where SvelteKit derives the origin from the request instead.
+[ -n "${ORIGIN:-}" ] || unset ORIGIN
 exec node apps/web/build
