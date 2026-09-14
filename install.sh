@@ -102,20 +102,22 @@ fi
 step "2/9  System packages (this is the slow part — a few minutes on a Pi)"
 # Build tools, headless-GL libs for OrcaSlicer, fonts, curl/git, python (native sqlite build).
 # libgl1-mesa-dri / mesa = software (llvmpipe) GL so OrcaSlicer renders under Xvfb on a GPU-less Pi.
+# python3-setuptools is REQUIRED: Python 3.12+ dropped distutils, which node-gyp needs to compile
+# better-sqlite3 — setuptools ships the distutils shim. Without it npm install fails on the Pi.
 apt_packages() {
   apt-get install -y -qq \
-    ca-certificates curl git build-essential python3 xvfb ffmpeg \
+    ca-certificates curl git build-essential python3 python3-setuptools xvfb ffmpeg \
     libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
     libwebkit2gtk-4.1-0 libxkbcommon0 libdbus-1-3 libxrandr2 libxfixes3 libxcursor1 libxi6 \
     libxcomposite1 libxdamage1 libxtst6 fontconfig fonts-dejavu-core \
-    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libxkbcommon0 libdbus-1-3 fontconfig fonts-dejavu-core
+    || apt-get install -y -qq ca-certificates curl git build-essential python3 python3-setuptools xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libxkbcommon0 libdbus-1-3 fontconfig fonts-dejavu-core
 }
 pacman_packages() {
   pacman -Sy --needed --noconfirm \
-    ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg \
+    ca-certificates curl git base-devel python python-setuptools xorg-server-xvfb ffmpeg \
     mesa libglvnd glu gtk3 gcc-libs nss libsecret webkit2gtk-4.1 libxkbcommon dbus \
     libxrandr libxcursor libxi libxcomposite libxdamage libxtst fontconfig ttf-dejavu \
-    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret libxkbcommon dbus fontconfig ttf-dejavu
+    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python python-setuptools xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret libxkbcommon dbus fontconfig ttf-dejavu
 }
 if [ "$PM" = apt ]; then
   export DEBIAN_FRONTEND=noninteractive
@@ -141,6 +143,9 @@ fi
 step "3/9  Application files"
 NOLOGIN="$(command -v nologin || echo /usr/sbin/nologin)"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --home-dir "$APP_DIR" --shell "$NOLOGIN" "$APP_USER"
+# We run git as root while the checkout is owned by the app user → mark it safe so git doesn't
+# refuse with "detected dubious ownership" (breaks the update-in-place path on re-run).
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH" -q && git -C "$APP_DIR" reset --hard "origin/$BRANCH" -q
   ok "Updated existing checkout in $APP_DIR."

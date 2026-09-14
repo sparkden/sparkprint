@@ -130,6 +130,7 @@ if [ -f "$APP_DIR/apps/web/.env" ]; then
 else
   echo "no .env at $APP_DIR/apps/web/.env" >>"$LOG"
 fi
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 run "git -C '$APP_DIR' log --oneline -1 2>&1; git -C '$APP_DIR' status -sb 2>&1 | head -5"
 
 # ── Upload ──────────────────────────────────────────────────────────────────────
