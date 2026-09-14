@@ -40,6 +40,32 @@ die()  { echo -e "\n${R}✗ $*${N}" >&2; exit 1; }
 ask()  { local p="$1" d="${2:-}" r; if [ -n "$d" ]; then read -rp "  $p [$d]: " r; echo "${r:-$d}"; else read -rp "  $p: " r; echo "$r"; fi; }
 askyn(){ local p="$1" d="${2:-y}" r; read -rp "  $p ($([ "$d" = y ] && echo 'Y/n' || echo 'y/N')): " r; r="${r:-$d}"; [[ "$r" =~ ^[Yy] ]]; }
 
+# Run a long/quiet command with a live heartbeat so it never looks hung. Output is captured; on
+# failure the tail is shown. Args: "<message>" cmd [args…]  (cmd may be a shell function).
+run_bg() {
+  local msg="$1"; shift
+  local log; log="$(mktemp)"
+  ( "$@" ) >"$log" 2>&1 &
+  local pid=$! start=$SECONDS rc=0
+  local spin='|/-\' i=0
+  if [ -t 1 ]; then
+    while kill -0 "$pid" 2>/dev/null; do
+      i=$(( (i + 1) % 4 ))
+      printf "\r  ${C}%s${N} %s… (%ds)" "${spin:$i:1}" "$msg" "$((SECONDS - start))"
+      sleep 0.5
+    done
+    printf "\r\033[K"
+  else
+    printf "  %s" "$msg"
+    while kill -0 "$pid" 2>/dev/null; do printf '.'; sleep 5; done
+    printf "\n"
+  fi
+  wait "$pid" || rc=$?
+  if [ "$rc" -eq 0 ]; then ok "$msg ($((SECONDS - start))s)"; else warn "$msg — failed (exit $rc):"; tail -n 15 "$log" | sed 's/^/      /'; fi
+  rm -f "$log"
+  return "$rc"
+}
+
 # ── Preflight ─────────────────────────────────────────────────────────────────
 step "SparkPrint installer"
 [ "$(id -u)" -eq 0 ] || die "Please run with sudo:  sudo bash install.sh"
@@ -73,40 +99,42 @@ else
 fi
 
 # ── 2. System packages ─────────────────────────────────────────────────────────
-step "2/9  System packages"
+step "2/9  System packages (this is the slow part — a few minutes on a Pi)"
 # Build tools, headless-GL libs for OrcaSlicer, fonts, curl/git, python (native sqlite build).
-if [ "$PM" = apt ]; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  # libgl1-mesa-dri = software (llvmpipe) GL so OrcaSlicer renders under Xvfb on a GPU-less Pi.
-  # The libx*/libxkbcommon/dbus set covers the GTK/X runtime the AppImage expects.
+# libgl1-mesa-dri / mesa = software (llvmpipe) GL so OrcaSlicer renders under Xvfb on a GPU-less Pi.
+apt_packages() {
   apt-get install -y -qq \
     ca-certificates curl git build-essential python3 xvfb ffmpeg \
     libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libsecret-1-0 \
     libwebkit2gtk-4.1-0 libxkbcommon0 libdbus-1-3 libxrandr2 libxfixes3 libxcursor1 libxi6 \
-    libxcomposite1 libxdamage1 libxtst6 fontconfig fonts-dejavu-core >/dev/null 2>&1 \
-    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libxkbcommon0 libdbus-1-3 fontconfig fonts-dejavu-core >/dev/null
-else
-  # Arch: base-devel (gcc/make), Xvfb, and the AppImage's GL/GTK runtime libs. mesa ships the
-  # software (swrast/llvmpipe) GL driver used for headless rendering.
+    libxcomposite1 libxdamage1 libxtst6 fontconfig fonts-dejavu-core \
+    || apt-get install -y -qq ca-certificates curl git build-essential python3 xvfb ffmpeg libgl1 libegl1 libglu1-mesa libgl1-mesa-dri libgtk-3-0 libgomp1 libnss3 libxkbcommon0 libdbus-1-3 fontconfig fonts-dejavu-core
+}
+pacman_packages() {
   pacman -Sy --needed --noconfirm \
     ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg \
     mesa libglvnd glu gtk3 gcc-libs nss libsecret webkit2gtk-4.1 libxkbcommon dbus \
-    libxrandr libxcursor libxi libxcomposite libxdamage libxtst fontconfig ttf-dejavu >/dev/null 2>&1 \
-    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret libxkbcommon dbus fontconfig ttf-dejavu >/dev/null
+    libxrandr libxcursor libxi libxcomposite libxdamage libxtst fontconfig ttf-dejavu \
+    || pacman -Sy --needed --noconfirm ca-certificates curl git base-devel python xorg-server-xvfb ffmpeg mesa libglvnd glu gtk3 gcc-libs nss libsecret libxkbcommon dbus fontconfig ttf-dejavu
+}
+if [ "$PM" = apt ]; then
+  export DEBIAN_FRONTEND=noninteractive
+  run_bg "Updating package lists" apt-get update -qq || warn "apt-get update had issues — continuing."
+  run_bg "Installing system libraries (Xvfb, GL, GTK, build tools)" apt_packages || die "System package install failed — see the log above."
+else
+  run_bg "Installing system libraries (Xvfb, GL, GTK, build tools)" pacman_packages || die "System package install failed — see the log above."
 fi
-ok "Base packages installed."
 
 # Node.js
+install_node_apt() { curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - && apt-get install -y -qq nodejs; }
 if command -v node >/dev/null 2>&1 && [ "$(node -v | grep -oE '[0-9]+' | head -1)" -ge "$NODE_MAJOR" ] 2>/dev/null; then
   ok "Node $(node -v) already present."
 elif [ "$PM" = apt ]; then
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null 2>&1
-  apt-get install -y -qq nodejs >/dev/null
-  ok "Installed Node $(node -v)."
+  run_bg "Installing Node.js $NODE_MAJOR" install_node_apt || die "Node install failed."
+  ok "Node $(node -v) ready."
 else
-  pacman -Sy --needed --noconfirm nodejs npm >/dev/null
-  ok "Installed Node $(node -v)."
+  run_bg "Installing Node.js" pacman -Sy --needed --noconfirm nodejs npm || die "Node install failed."
+  ok "Node $(node -v) ready."
 fi
 
 # ── 3. App user + code ──────────────────────────────────────────────────────────
