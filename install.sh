@@ -349,59 +349,12 @@ cat <<'EOF'
 EOF
 if askyn "Set up a Cloudflare Tunnel now?"; then
   # Clear any previous tunnel service + deployed config so we never stack duplicate/stale records.
-  # (The named tunnel + your login stay in your Cloudflare account and are reused.)
+  # (Your Cloudflare login stays; the helper recreates the named tunnel cleanly.)
   purge_cloudflared
   systemctl daemon-reload 2>/dev/null || true
-  if ! command -v cloudflared >/dev/null 2>&1; then
-    echo "  Installing cloudflared…"
-    CF_ARCH="$([ "$ARCH" = "aarch64" ] && echo arm64 || echo amd64)"
-    # Portable static binary — works on Debian and Arch alike.
-    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" -o /usr/local/bin/cloudflared \
-      && chmod +x /usr/local/bin/cloudflared && ok "cloudflared installed." || warn "cloudflared install failed."
-  fi
-  if command -v cloudflared >/dev/null 2>&1; then
-    echo -e "\n  ${B}A browser login link will appear. Open it, pick the domain to authorize, and approve.${N}"
-    echo "  (Picking the domain there only authorizes it — you choose the exact subdomain next.)"
-    cloudflared tunnel login || warn "Login not completed."
-    echo -e "\n  ${B}Now the address students will visit — use a SUBDOMAIN, e.g. print.yourschool.org${N}"
-    echo "  (not the bare yourschool.org). It's created for you; it doesn't need to exist yet."
-    HOSTNAME="$(ask 'Subdomain to publish on' 'print.yourschool.org')"
-    # A bare apex domain (one dot, e.g. school.org) is almost never what a lab wants — nudge them.
-    if [ "$(printf '%s' "$HOSTNAME" | tr -cd '.' | wc -c)" -lt 2 ]; then
-      warn "'$HOSTNAME' looks like a bare domain — students usually get a subdomain like print.$HOSTNAME"
-      askyn "Publish on '$HOSTNAME' anyway?" n || HOSTNAME="$(ask 'Subdomain to publish on' "print.$HOSTNAME")"
-    fi
-    TUNNEL_NAME="sparkprint"
-    cloudflared tunnel list 2>/dev/null | grep -q " $TUNNEL_NAME " || cloudflared tunnel create "$TUNNEL_NAME"
-    TUNNEL_ID="$(cloudflared tunnel list 2>/dev/null | awk -v n="$TUNNEL_NAME" '$2==n{print $1}' | head -1)"
-    CRED_FILE="$(ls -1 "$SUDO_USER_HOME/.cloudflared/${TUNNEL_ID}.json" /root/.cloudflared/${TUNNEL_ID}.json 2>/dev/null | head -1)"
-    if [ -n "$TUNNEL_ID" ] && [ -n "$CRED_FILE" ]; then
-      mkdir -p /etc/cloudflared
-      cp "$CRED_FILE" "/etc/cloudflared/${TUNNEL_ID}.json"
-      cat > /etc/cloudflared/config.yml <<EOF
-tunnel: $TUNNEL_ID
-credentials-file: /etc/cloudflared/${TUNNEL_ID}.json
-ingress:
-  - hostname: $HOSTNAME
-    service: http://localhost:$APP_PORT
-  - service: http_status:404
-EOF
-      # --overwrite-dns so re-running (or changing the subdomain) updates the record instead of failing.
-      cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME" || warn "Couldn't set the DNS route — check it in the Cloudflare dashboard."
-      cloudflared service install >/dev/null 2>&1 || true
-      systemctl enable --now cloudflared >/dev/null 2>&1 || true
-      # Point the app at its public origin (CSRF / absolute URLs) and restart.
-      if grep -q '^ORIGIN=' "$ENV_FILE"; then
-        sed -i "s#^ORIGIN=.*#ORIGIN=\"https://$HOSTNAME\"#" "$ENV_FILE"
-      else
-        echo "ORIGIN=\"https://$HOSTNAME\"" >> "$ENV_FILE"
-      fi
-      systemctl restart sparkprint
-      ok "Tunnel live: https://$HOSTNAME  (DNS may take a minute to propagate)"
-    else
-      warn "Couldn't finish tunnel setup automatically. See docs/PI-SETUP.md for manual steps."
-    fi
-  fi
+  # All the tunnel logic lives in one idempotent, re-runnable helper.
+  bash "$APP_DIR/scripts/cf-tunnel.sh" \
+    || warn "Tunnel setup didn't finish. Re-run it any time:  sudo bash $APP_DIR/scripts/cf-tunnel.sh <subdomain>"
 else
   ok "Skipped — use SparkPrint at http://$(hostname -I | awk '{print $1}'):$APP_PORT on your network."
 fi
