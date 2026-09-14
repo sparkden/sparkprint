@@ -360,9 +360,17 @@ if askyn "Set up a Cloudflare Tunnel now?"; then
       && chmod +x /usr/local/bin/cloudflared && ok "cloudflared installed." || warn "cloudflared install failed."
   fi
   if command -v cloudflared >/dev/null 2>&1; then
-    echo -e "\n  ${B}A browser login link will appear. Open it, pick your domain, and authorize.${N}"
+    echo -e "\n  ${B}A browser login link will appear. Open it, pick the domain to authorize, and approve.${N}"
+    echo "  (Picking the domain there only authorizes it — you choose the exact subdomain next.)"
     cloudflared tunnel login || warn "Login not completed."
-    HOSTNAME="$(ask 'Full hostname to use (e.g. print.yourschool.org)')"
+    echo -e "\n  ${B}Now the address students will visit — use a SUBDOMAIN, e.g. print.yourschool.org${N}"
+    echo "  (not the bare yourschool.org). It's created for you; it doesn't need to exist yet."
+    HOSTNAME="$(ask 'Subdomain to publish on' 'print.yourschool.org')"
+    # A bare apex domain (one dot, e.g. school.org) is almost never what a lab wants — nudge them.
+    if [ "$(printf '%s' "$HOSTNAME" | tr -cd '.' | wc -c)" -lt 2 ]; then
+      warn "'$HOSTNAME' looks like a bare domain — students usually get a subdomain like print.$HOSTNAME"
+      askyn "Publish on '$HOSTNAME' anyway?" n || HOSTNAME="$(ask 'Subdomain to publish on' "print.$HOSTNAME")"
+    fi
     TUNNEL_NAME="sparkprint"
     cloudflared tunnel list 2>/dev/null | grep -q " $TUNNEL_NAME " || cloudflared tunnel create "$TUNNEL_NAME"
     TUNNEL_ID="$(cloudflared tunnel list 2>/dev/null | awk -v n="$TUNNEL_NAME" '$2==n{print $1}' | head -1)"
@@ -378,7 +386,8 @@ ingress:
     service: http://localhost:$APP_PORT
   - service: http_status:404
 EOF
-      cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME" || warn "DNS route may already exist."
+      # --overwrite-dns so re-running (or changing the subdomain) updates the record instead of failing.
+      cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME" || warn "Couldn't set the DNS route — check it in the Cloudflare dashboard."
       cloudflared service install >/dev/null 2>&1 || true
       systemctl enable --now cloudflared >/dev/null 2>&1 || true
       # Point the app at its public origin (CSRF / absolute URLs) and restart.
