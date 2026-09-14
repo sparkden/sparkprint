@@ -31,6 +31,11 @@ NODE_MAJOR="22"
 # "latest" = newest release that matches this machine's arch + glibc. Pin a version to override.
 ORCA_VERSION="${ORCA_VERSION:-latest}"
 
+# --fresh / SPARKPRINT_FRESH=1 → wipe previous systemd + Cloudflare records first (a clean slate).
+FRESH=0
+for a in "$@"; do case "$a" in --fresh|--clean|--reset) FRESH=1 ;; esac; done
+[ "${SPARKPRINT_FRESH:-0}" = 1 ] && FRESH=1
+
 # ── Pretty output ─────────────────────────────────────────────────────────────
 if [ -t 1 ]; then B="\033[1m"; G="\033[32m"; Y="\033[33m"; R="\033[31m"; C="\033[36m"; N="\033[0m"; else B=""; G=""; Y=""; R=""; C=""; N=""; fi
 step() { echo -e "\n${B}${C}==> $*${N}"; }
@@ -39,6 +44,29 @@ warn() { echo -e "  ${Y}!${N} $*"; }
 die()  { echo -e "\n${R}✗ $*${N}" >&2; exit 1; }
 ask()  { local p="$1" d="${2:-}" r; if [ -n "$d" ]; then read -rp "  $p [$d]: " r; echo "${r:-$d}"; else read -rp "  $p: " r; echo "$r"; fi; }
 askyn(){ local p="$1" d="${2:-y}" r; read -rp "  $p ($([ "$d" = y ] && echo 'Y/n' || echo 'y/N')): " r; r="${r:-$d}"; [[ "$r" =~ ^[Yy] ]]; }
+
+# Completely remove a systemd unit: stop it, disable it, delete the unit file + any drop-ins +
+# enable symlinks, and clear any failed state. Safe to call when the unit doesn't exist.
+purge_unit() {
+  local u="$1"
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl stop "$u" 2>/dev/null || true
+  systemctl disable "$u" 2>/dev/null || true
+  rm -f "/etc/systemd/system/$u" 2>/dev/null || true
+  rm -rf "/etc/systemd/system/$u.d" 2>/dev/null || true
+  rm -f "/etc/systemd/system/multi-user.target.wants/$u" /lib/systemd/system/"$u" 2>/dev/null || true
+  systemctl reset-failed "$u" 2>/dev/null || true
+}
+# Remove the local cloudflared tunnel service + deployed config/creds. The tunnel itself stays in
+# your Cloudflare account (so it can be reused). Pass "deep" to also clear the account login state.
+purge_cloudflared() {
+  command -v cloudflared >/dev/null 2>&1 && cloudflared service uninstall >/dev/null 2>&1 || true
+  purge_unit cloudflared.service
+  rm -rf /etc/cloudflared 2>/dev/null || true
+  if [ "${1:-}" = deep ]; then
+    rm -rf /root/.cloudflared "${SUDO_USER_HOME:-/root}/.cloudflared" 2>/dev/null || true
+  fi
+}
 
 # Run a long/quiet command with a live heartbeat so it never looks hung. Output is captured; on
 # failure the tail is shown. Args: "<message>" cmd [args…]  (cmd may be a shell function).
@@ -81,6 +109,15 @@ if command -v apt-get >/dev/null 2>&1; then PM=apt
 elif command -v pacman >/dev/null 2>&1; then PM=pacman
 else die "Unsupported distro — need apt (Debian family) or pacman (Arch family)."; fi
 echo "  Package manager: $PM"
+
+# ── Fresh start: wipe previous service + tunnel records ─────────────────────────
+if [ "$FRESH" = 1 ]; then
+  step "Fresh start — removing previous SparkPrint service + Cloudflare records"
+  purge_unit sparkprint.service
+  purge_cloudflared deep          # also clears the Cloudflare login so setup starts clean
+  command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload 2>/dev/null || true
+  ok "Cleared old systemd + cloudflared records (your database and files are kept)."
+fi
 
 # ── 1. Wi-Fi ──────────────────────────────────────────────────────────────────
 step "1/9  Network"
@@ -269,6 +306,10 @@ chmod +x "$APP_DIR/scripts/run-prod.sh"
 
 # ── 8. systemd service (runs on boot) ────────────────────────────────────────────
 step "8/9  System service"
+# Always tear down any previous unit first (stale drop-ins / failed state / old definition) so we
+# deploy from a clean slate — no leftover records from an earlier install.
+purge_unit sparkprint.service
+systemctl daemon-reload 2>/dev/null || true
 cat > /etc/systemd/system/sparkprint.service <<EOF
 [Unit]
 Description=SparkPrint server
@@ -307,6 +348,10 @@ cat <<'EOF'
   Skip this to just use the Pi on your local network (http://<pi-ip>:PORT).
 EOF
 if askyn "Set up a Cloudflare Tunnel now?"; then
+  # Clear any previous tunnel service + deployed config so we never stack duplicate/stale records.
+  # (The named tunnel + your login stay in your Cloudflare account and are reused.)
+  purge_cloudflared
+  systemctl daemon-reload 2>/dev/null || true
   if ! command -v cloudflared >/dev/null 2>&1; then
     echo "  Installing cloudflared…"
     CF_ARCH="$([ "$ARCH" = "aarch64" ] && echo arm64 || echo amd64)"
@@ -369,5 +414,6 @@ cat <<EOF
     sudo journalctl -u sparkprint -f      # live logs
     sudo systemctl restart sparkprint     # restart
     sudo bash $APP_DIR/install.sh         # update / re-run
+    sudo bash $APP_DIR/install.sh --fresh # clean re-install (wipes old service + tunnel records)
 
 EOF
