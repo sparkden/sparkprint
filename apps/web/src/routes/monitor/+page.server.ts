@@ -1,14 +1,31 @@
 import { redirect, fail } from '@sveltejs/kit';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { printers, printJobs, users, models } from '$lib/server/db/schema';
+import { printers, printJobs, users, models, orgs } from '$lib/server/db/schema';
 import { checkoutJob } from '$lib/server/jobs';
+import { getSetting } from '$lib/server/settings';
 import type { Actions, PageServerLoad } from './$types';
 
+// Resolve the org for a kiosk request (a physical lab display with no login) from its token.
+async function kioskOrg(token: string | null): Promise<{ orgId: string; orgName: string } | null> {
+	if (!token) return null;
+	const stored = await getSetting('kiosk.token');
+	if (!stored || token !== stored) return null;
+	const orgId = await getSetting('kiosk.orgId');
+	if (!orgId) return null;
+	const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId)).limit(1);
+	return o ? { orgId, orgName: o.name } : null;
+}
+
 // Fullscreen lab monitor for the shared lab computer. Any signed-in member can view + check out
-// finished prints (physical kiosk — whoever is at the lab pulls a print off and checks it out).
-export const load: PageServerLoad = async ({ locals }) => {
-	const user = locals.user;
+// finished prints. Also runs as a no-login kiosk via ?kiosk=<token> (the Pi display).
+export const load: PageServerLoad = async ({ locals, url }) => {
+	let user = locals.user as { orgId: string; orgName: string; role: string } | null;
+	let kiosk = false;
+	if (!user) {
+		const k = await kioskOrg(url.searchParams.get('kiosk'));
+		if (k) { user = { orgId: k.orgId, orgName: k.orgName, role: 'student' }; kiosk = true; }
+	}
 	if (!user) throw redirect(303, '/login?next=/monitor');
 
 	const rows = await db
@@ -44,15 +61,30 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.orderBy(desc(printJobs.priority), asc(printJobs.createdAt))
 		.limit(12);
 
-	return { printers: rows, queue, orgName: user.orgName, isStaff: ['owner', 'admin', 'teacher'].includes(user.role) };
+	return {
+		printers: rows,
+		queue,
+		orgName: user.orgName,
+		isStaff: !kiosk && ['owner', 'admin', 'teacher'].includes(user.role),
+		kiosk,
+		kioskToken: kiosk ? (url.searchParams.get('kiosk') ?? '') : ''
+	};
 };
 
 export const actions: Actions = {
-	checkout: async ({ request, locals }) => {
+	checkout: async ({ request, locals, url }) => {
 		const user = locals.user;
-		if (!user) return fail(401, { error: 'Sign in' });
-		const jobId = String((await request.formData()).get('jobId'));
-		const r = await checkoutJob(jobId, user.orgId, user.id);
+		const fd = await request.formData();
+		// Signed-in member, or the physical kiosk (token, carried in the URL or the form) — both can
+		// check a finished print off the bed.
+		let orgId: string | null = user?.orgId ?? null;
+		let actorId: string | undefined = user?.id;
+		if (!orgId) {
+			const k = await kioskOrg(url.searchParams.get('kiosk') || String(fd.get('kiosk') || ''));
+			if (k) { orgId = k.orgId; actorId = undefined; }
+		}
+		if (!orgId) return fail(401, { error: 'Sign in' });
+		const r = await checkoutJob(String(fd.get('jobId')), orgId, actorId);
 		if (!r.ok) return fail(400, { error: r.error });
 		return { success: true };
 	}

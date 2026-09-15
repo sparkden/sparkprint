@@ -27,6 +27,7 @@ export function buildNav(role: string, opts: { pendingApprovals?: number } = {})
 				{ label: 'Members', href: '/admin/members', icon: 'users' },
 				{ label: 'Invites', href: '/admin/invites', icon: 'link' },
 				{ label: 'Diagnostics', href: '/admin/diagnostics', icon: 'gauge' },
+				{ label: 'Kiosk', href: '/admin/kiosk', icon: 'eye' },
 				{ label: 'Terminal', href: '/admin/terminal', icon: 'terminal' },
 				{ label: 'Update', href: '/admin/update', icon: 'refresh' },
 				{ label: 'Settings', href: '/admin/settings', icon: 'settings' }

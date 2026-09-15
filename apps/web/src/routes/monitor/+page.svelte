@@ -97,6 +97,7 @@
 						<p class="mt-0.5 truncate text-xs text-muted-ink">{p.ownerName ?? '—'} · done</p>
 						<form method="POST" action="?/checkout" use:enhance class="mt-3">
 							<input type="hidden" name="jobId" value={p.jobId} />
+							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-primary w-full"><Icon name="check" size={16} /> Picked up — check out</button>
 						</form>
 					</div>
