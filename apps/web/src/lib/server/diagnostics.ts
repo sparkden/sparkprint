@@ -14,7 +14,7 @@ import { putBuffer, removeObject } from './storage';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 export type Check = { name: string; status: CheckStatus; detail: string; fix?: string };
-export type PrinterReport = { id: string; name: string; model: string; ip: string | null; status: CheckStatus; checks: Check[] };
+export type PrinterReport = { id: string; name: string; model: string; ip: string | null; status: CheckStatus; occupied: boolean; checks: Check[] };
 export type Diagnostics = { system: Check[]; printers: PrinterReport[]; generatedAt: string };
 
 /** TCP connect test with a short timeout. Returns 'OPEN' or an error code. */
@@ -108,12 +108,18 @@ async function printerReport(p: typeof printers.$inferSelect): Promise<PrinterRe
 			: { name: 'Live connection', status: p.ipAddress && p.accessCode ? 'warn' : 'fail', detail: 'Not currently connected.', fix: 'If the port test above passes, check the access code is correct and the printer is in LAN Mode.' }
 	);
 
-	// Status
+	// Status. A printer is free for a new job when it has no SparkPrint job occupying it
+	// (currentJobId) and isn't mid-print — regardless of the raw 'finished' telemetry.
+	const busyPrinting = p.status === 'printing' || p.status === 'paused';
+	const occupied = !!p.currentJobId; // a SparkPrint job printing or awaiting checkout
 	const seenMin = p.lastSeenAt ? Math.round((Date.now() - new Date(p.lastSeenAt).getTime()) / 60000) : null;
 	checks.push({
-		name: 'Reported status',
-		status: p.status === 'idle' ? 'pass' : p.status === 'printing' || p.status === 'paused' ? 'warn' : 'warn',
-		detail: `${p.status}${seenMin != null ? ` · last seen ${seenMin}m ago` : ' · never reported'}` + (p.status === 'finished' ? ' (needs checkout before reuse)' : '')
+		name: 'Availability',
+		status: busyPrinting || occupied ? 'warn' : 'pass',
+		detail:
+			`${p.status}${seenMin != null ? ` · last seen ${seenMin}m ago` : ' · never reported'}` +
+			(occupied && !busyPrinting ? ' — holding a finished print' : ''),
+		fix: occupied && !busyPrinting ? 'Check it out (Lab monitor or the print’s status) to free it for the next job.' : undefined
 	});
 
 	// Colors loaded
@@ -131,10 +137,10 @@ async function printerReport(p: typeof printers.$inferSelect): Promise<PrinterRe
 
 	// Overall printer verdict = worst check.
 	const worst: CheckStatus = checks.some((c) => c.status === 'fail') ? 'fail' : checks.some((c) => c.status === 'warn') ? 'warn' : 'pass';
-	// A printer that's connected + idle + has color is genuinely ready → surface as pass even if the
+	// A printer that's connected + free + has color is genuinely ready → surface as pass even if the
 	// camera is just a warn.
-	const ready = live && p.status === 'idle' && loaded.length > 0 && !!p.ipAddress && !!p.accessCode;
-	return { id: p.id, name: p.name, model: p.model, ip: p.ipAddress, status: ready ? 'pass' : worst, checks };
+	const ready = live && !busyPrinting && !occupied && loaded.length > 0 && !!p.ipAddress && !!p.accessCode;
+	return { id: p.id, name: p.name, model: p.model, ip: p.ipAddress, status: ready ? 'pass' : worst, occupied: occupied && !busyPrinting, checks };
 }
 
 export async function runDiagnostics(orgId: string): Promise<Diagnostics> {

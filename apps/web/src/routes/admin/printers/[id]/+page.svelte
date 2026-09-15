@@ -43,6 +43,11 @@
 	</a>
 	<PageHeader title="{data.printer.name}" subtitle="Map each AMS slot to the filament and color that's loaded.">
 		{#snippet actions()}
+			{#if data.printer.status === 'finished' || data.printer.currentJobId}
+				<form method="POST" action="?/markFree" use:enhance style="display:inline">
+					<button class="btn btn-secondary btn-sm" title="Bed cleared — free this printer for new jobs"><Icon name="check" size={15} /> Mark as free</button>
+				</form>
+			{/if}
 			<form method="POST" action="?/reloadAms" use:enhance style="display:inline">
 				<button class="btn btn-ghost btn-sm" title="Pull live AMS from the printer"><Icon name="refresh" size={15} /> Reload</button>
 			</form>

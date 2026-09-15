@@ -6,6 +6,7 @@ import { printers, amsUnits, amsSlots } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import { BAMBU_BASIC } from '$lib/server/bambu';
 import { manager } from '$lib/server/bambu/manager';
+import { freePrinter } from '$lib/server/jobs';
 import type { Actions, PageServerLoad } from './$types';
 
 async function ownedPrinter(orgId: string, id: string) {
@@ -132,5 +133,15 @@ export const actions: Actions = {
 		if (!printer) return fail(404, { error: 'Printer not found' });
 		const ok = await manager().unloadFilament(printer.id);
 		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload — the printer may be offline or blocking third-party control commands.' };
+	},
+
+	// Clear a stuck 'finished' printer (bed removed) so it can take new jobs again.
+	markFree: async ({ params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const res = await freePrinter(printer.id, me.orgId, me.id);
+		if (!res.ok) return fail(400, { error: res.error });
+		return { success: true, message: 'Printer marked as free.' };
 	}
 };

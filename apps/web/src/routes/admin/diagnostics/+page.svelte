@@ -16,6 +16,11 @@
 		}
 	}
 
+	async function free(printerId: string) {
+		await fetch('/admin/diagnostics/free', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ printerId }) });
+		await run();
+	}
+
 	const dot: Record<CheckStatus, string> = { pass: 'bg-success', warn: 'bg-warning', fail: 'bg-danger' };
 	const ring: Record<CheckStatus, string> = { pass: 'border-success/30 bg-success/5', warn: 'border-warning/40 bg-warning/5', fail: 'border-danger/40 bg-danger/5' };
 	const label: Record<CheckStatus, string> = { pass: 'OK', warn: 'Check', fail: 'Fix' };
@@ -73,7 +78,10 @@
 					<h2 class="flex items-center gap-2 font-semibold"><Icon name="printer" size={16} /> {p.name}</h2>
 					<span class="flex items-center gap-1.5 text-xs font-semibold {p.status === 'pass' ? 'text-success' : p.status === 'warn' ? 'text-[#a35f00]' : 'text-danger'}"><span class="h-2.5 w-2.5 rounded-full {dot[p.status]}"></span>{p.status === 'pass' ? 'Ready' : p.status === 'warn' ? 'Needs attention' : 'Not usable'}</span>
 				</div>
-				<p class="mb-2 text-xs text-muted-ink">{p.model}{#if p.ip} · {p.ip}{/if}</p>
+				<div class="mb-2 flex items-center justify-between gap-2">
+					<p class="text-xs text-muted-ink">{p.model}{#if p.ip} · {p.ip}{/if}</p>
+					{#if p.occupied}<button type="button" class="btn btn-secondary btn-sm" onclick={() => free(p.id)}><Icon name="check" size={14} /> Mark as free</button>{/if}
+				</div>
 				<div class="divide-y divide-warm-100">
 					{#each p.checks as c}{@render checkRow(c)}{/each}
 				</div>

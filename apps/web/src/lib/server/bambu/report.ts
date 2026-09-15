@@ -53,8 +53,15 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 
 	// ── Telemetry ───────────────────────────────────────────────────────────────
 	const patch: Record<string, unknown> = { online: true, lastSeenAt: new Date(), updatedAt: new Date() };
-	if (typeof print.gcode_state === 'string' && STATE_MAP[print.gcode_state])
-		patch.status = STATE_MAP[print.gcode_state];
+	if (typeof print.gcode_state === 'string' && STATE_MAP[print.gcode_state]) {
+		let s = STATE_MAP[print.gcode_state];
+		// A Bambu printer reports FINISH until the next print starts. That only means "occupied /
+		// awaiting checkout" when SparkPrint is actually tracking a job here (currentJobId). With no
+		// tracked job, a stale/external FINISH just means the bed is free → treat it as idle so the
+		// printer doesn't get stuck unusable.
+		if (s === 'finished' && !printer.currentJobId) s = 'idle';
+		patch.status = s;
+	}
 	if (print.mc_percent != null) patch.progressPct = numOrNull(print.mc_percent);
 	if (print.mc_remaining_time != null) patch.remainingTimeMin = numOrNull(print.mc_remaining_time);
 	if (print.nozzle_temper != null) patch.nozzleTemp = numOrNull(print.nozzle_temper)?.toFixed(1);

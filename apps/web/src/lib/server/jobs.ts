@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, notInArray } from 'drizzle-orm';
 import { db } from './db';
 import {
 	printJobs,
@@ -96,9 +96,12 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				eq(printers.orgId, job.orgId),
 				eq(printers.enabled, true),
 				eq(printers.online, true),
-				// Only genuinely free printers — a 'finished' printer still has a print on the bed
-				// awaiting pickup and must be checked out before it can be reused.
-				eq(printers.status, 'idle')
+				// Free = no SparkPrint job occupying it (currentJobId is the checkout gate) and not
+				// mid-print. We deliberately DON'T require status 'idle': a Bambu printer reports
+				// 'finished' until the next print starts, so keying off telemetry alone would leave a
+				// printer permanently unusable after its first job even once it's been checked out.
+				isNull(printers.currentJobId),
+				notInArray(printers.status, ['printing', 'paused'])
 			)
 		)
 		.orderBy(desc(printers.priority), asc(printers.name));
@@ -186,15 +189,16 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 	await db.update(printJobs).set({ status: 'queued', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
 	// Explain WHY nothing dispatched so the timeline is actionable instead of just "waiting".
 	const all = await db
-		.select({ online: printers.online, status: printers.status, model: printers.model })
+		.select({ online: printers.online, status: printers.status, model: printers.model, currentJobId: printers.currentJobId })
 		.from(printers)
 		.where(and(eq(printers.orgId, job.orgId), eq(printers.enabled, true)));
 	const printable = all.filter((p) => isCloudPrintable(p.model));
+	const free = (p: (typeof printable)[number]) => p.online && !p.currentJobId && p.status !== 'printing' && p.status !== 'paused';
 	let reason = 'Waiting for a compatible printer';
 	if (!printable.length) reason = 'No printers are set up yet — add one in Admin → Printers.';
 	else if (!printable.some((p) => p.online)) reason = 'No printer is online — check each printer’s LAN IP + access code, LAN mode, and that the Pi is on the same network.';
-	else if (!printable.some((p) => p.online && p.status === 'idle')) reason = 'Printers are online but busy — the job will start when one is free (finished prints must be checked out first).';
-	else reason = 'No available printer has the requested color loaded — load the color or pick another.';
+	else if (!printable.some(free)) reason = 'Printers are online but busy — the job will start when one is free (finished prints must be checked out first).';
+	else reason = 'No free printer has the requested color loaded — load the color on an available printer (Diagnostics shows which), or pick another color.';
 	await logEvent(jobId, 'queue', reason);
 	return 'queued';
 }
@@ -450,6 +454,28 @@ export async function checkoutJob(jobId: string, orgId: string, actorId?: string
 	});
 	await logEvent(jobId, 'status_change', 'Checked out — printer freed', {}, actorId);
 	if (job.printerId) await promoteQueue(orgId);
+	return { ok: true };
+}
+
+/**
+ * Force a printer back to "free" — clears any SparkPrint job still on it (checks out an
+ * awaiting-pickup print) and resets its state, so it can take new jobs. For the "Mark as free"
+ * button when a printer is stuck showing 'finished'.
+ */
+export async function freePrinter(printerId: string, orgId: string, actorId?: string): Promise<{ ok: boolean; error?: string }> {
+	const [p] = await db.select().from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, orgId))).limit(1);
+	if (!p) return { ok: false, error: 'Printer not found' };
+	if (p.status === 'printing') return { ok: false, error: 'This printer is currently printing — pause/stop it first.' };
+	// Check out any print still awaiting pickup on this printer.
+	const [job] = await db
+		.select({ id: printJobs.id })
+		.from(printJobs)
+		.where(and(eq(printJobs.printerId, printerId), eq(printJobs.status, 'awaiting_pickup')))
+		.limit(1);
+	if (job) await checkoutJob(job.id, orgId, actorId);
+	// Force it free regardless of telemetry (Bambu keeps reporting 'finished' until the next print).
+	await db.update(printers).set({ status: 'idle', currentJobId: null, progressPct: null, updatedAt: new Date() }).where(eq(printers.id, printerId));
+	await promoteQueue(orgId);
 	return { ok: true };
 }
 
