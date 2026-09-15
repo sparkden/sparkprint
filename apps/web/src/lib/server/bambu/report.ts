@@ -91,22 +91,24 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 			const slotIndex = parseInt(tray.id ?? '0', 10) || 0;
 			const color = normColor(tray.tray_color);
 			const empty = !tray.tray_type || tray.tray_type === '';
-			const slotVals = {
-				printerId: printer.id,
-				filamentType: empty ? null : tray.tray_type,
-				filamentBrand: tray.tray_sub_brands || 'Bambu',
-				colorHex: color,
-				colorName: tray.tray_id_name || null,
-				trayUuid: tray.tray_uuid || null,
-				remainingPct: numOrNull(tray.remain),
-				empty,
-				updatedAt: new Date()
-			};
 			const [existingSlot] = await db
 				.select()
 				.from(amsSlots)
 				.where(and(eq(amsSlots.amsUnitId, amsUnitId), eq(amsSlots.slotIndex, slotIndex)))
 				.limit(1);
+			// Preserve a manually-set color/name when the printer doesn't report one (common with
+			// third-party filament that has no RFID) — otherwise every telemetry report would wipe it.
+			const slotVals = {
+				printerId: printer.id,
+				filamentType: empty ? null : tray.tray_type || existingSlot?.filamentType || 'PLA',
+				filamentBrand: tray.tray_sub_brands || existingSlot?.filamentBrand || 'Bambu',
+				colorHex: empty ? null : color ?? existingSlot?.colorHex ?? null,
+				colorName: empty ? null : tray.tray_id_name || existingSlot?.colorName || null,
+				trayUuid: tray.tray_uuid || existingSlot?.trayUuid || null,
+				remainingPct: numOrNull(tray.remain),
+				empty,
+				updatedAt: new Date()
+			};
 			if (existingSlot) {
 				await db.update(amsSlots).set(slotVals).where(eq(amsSlots.id, existingSlot.id));
 			} else {
@@ -126,18 +128,19 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		const EXT = 254;
 		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
 		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT, updatedAt: new Date() }).returning())[0].id;
+		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
+		// Only overwrite a manually-set external color when the printer actually reports one.
 		const slotVals = {
 			printerId: printer.id,
-			filamentType: empty ? null : vt.tray_type,
-			filamentBrand: vt.tray_sub_brands || 'External',
-			colorHex: color,
-			colorName: vt.tray_id_name || null,
-			trayUuid: vt.tray_uuid || null,
+			filamentType: empty ? null : vt.tray_type || existing?.filamentType || 'PLA',
+			filamentBrand: vt.tray_sub_brands || existing?.filamentBrand || 'External',
+			colorHex: empty ? null : color ?? existing?.colorHex ?? null,
+			colorName: empty ? null : vt.tray_id_name || existing?.colorName || null,
+			trayUuid: vt.tray_uuid || existing?.trayUuid || null,
 			remainingPct: numOrNull(vt.remain),
 			empty,
 			updatedAt: new Date()
 		};
-		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
 		if (existing) await db.update(amsSlots).set(slotVals).where(eq(amsSlots.id, existing.id));
 		else await db.insert(amsSlots).values({ amsUnitId: unitId, slotIndex: 0, ...slotVals });
 	}
