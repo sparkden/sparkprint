@@ -117,7 +117,10 @@
 
 	// Default build plate (256³); auto-assigned later to whichever printer has the color.
 	const plate = { x: 256, y: 256, z: 256 };
-	const hasModel = $derived((stats?.objects ?? 0) > 0);
+	// Track object count from BOTH the stats callback and directly after a load, so the empty-state
+	// overlay reliably lifts once a model is in the editor.
+	let objectCount = $state(0);
+	const hasModel = $derived(objectCount > 0);
 	const canSlice = $derived(hasModel && !!selected);
 	const canSubmit = $derived(hasModel && !!selected && !!name);
 
@@ -133,12 +136,14 @@
 		{ label: 'Fine', h: 0.12 }
 	];
 
-	function addFiles(files: FileList | null | undefined) {
+	async function addFiles(files: FileList | null | undefined) {
 		if (!files) return;
 		for (const f of Array.from(files)) {
-			editor?.addObject(f);
+			await editor?.addObject(f);
 			if (!name) name = f.name.replace(/\.(stl|obj|3mf)$/i, '');
 		}
+		// Read the count straight from the editor so the overlay lifts even if the stats callback lagged.
+		objectCount = editor?.count?.() ?? objectCount;
 	}
 	function onInput(e: Event) { addFiles((e.target as HTMLInputElement).files); (e.target as HTMLInputElement).value = ''; }
 	function onDrop(e: DragEvent) { e.preventDefault(); dragOver = false; addFiles(e.dataTransfer?.files); }
@@ -154,7 +159,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; invalidatePreview(); }} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
