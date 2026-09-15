@@ -119,13 +119,22 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 		};
 		const to = setTimeout(() => done(new Error('printer MQTT timed out')), 20000);
 		client.on('connect', () => {
+			const subtask = params.fileName.replace(/\.gcode\.3mf$/i, '');
 			const cmd = {
 				print: {
 					command: 'project_file',
 					sequence_id: String(Date.now() % 1e7),
 					param: `Metadata/plate_${params.plateIdx ?? 1}.gcode`,
+					// These id/name fields are required by P1 firmware to actually start the job — without
+					// them the command is silently ignored (the file uploads but nothing prints).
+					project_id: '0',
+					profile_id: '0',
+					task_id: '0',
+					subtask_id: '0',
+					subtask_name: subtask,
 					file: params.fileName,
 					url: `ftp:///${params.fileName}`, // file at the FTP root
+					md5: '',
 					bed_type: params.bedType ?? 'auto',
 					bed_leveling: true,
 					flow_cali: false,
@@ -133,7 +142,8 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 					layer_inspect: false,
 					timelapse: false,
 					use_ams: params.useAms,
-					ams_mapping: params.useAms ? params.amsMapping : [0]
+					// External spool (no AMS) → empty mapping, not [0].
+					ams_mapping: params.useAms ? params.amsMapping : []
 				}
 			};
 			client.publish(`device/${params.serial}/request`, JSON.stringify(cmd), { qos: 0 }, (err) => {
