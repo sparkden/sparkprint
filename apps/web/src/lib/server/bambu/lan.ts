@@ -37,15 +37,18 @@ function ftpAccess(client: FtpClient, ip: string, accessCode: string) {
 	});
 }
 
-/** Does the file already exist on the printer at the expected size? (fresh connection) */
-async function ftpsVerify(ip: string, accessCode: string, remoteName: string, expected: number): Promise<boolean> {
+/** Check whether the uploaded file actually landed (fresh connection). 'ok' = present at the right
+ *  size; 'missing' = definitely not there (or wrong size); 'unknown' = couldn't check (printer
+ *  dropped the connection, which Bambu does routinely). */
+async function ftpsCheck(ip: string, accessCode: string, remoteName: string, expected: number): Promise<'ok' | 'missing' | 'unknown'> {
 	const client = new FtpClient(15000);
 	try {
 		await ftpAccess(client, ip, accessCode);
 		const size = await client.size(remoteName);
-		return size === expected;
-	} catch {
-		return false;
+		return size === expected ? 'ok' : 'missing';
+	} catch (e) {
+		const m = String((e as Error)?.message ?? e);
+		return /550|not found|no such|does not exist/i.test(m) ? 'missing' : 'unknown';
 	} finally {
 		client.close();
 	}
@@ -59,6 +62,7 @@ async function ftpsVerify(ip: string, accessCode: string, remoteName: string, ex
  */
 export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, remoteName: string): Promise<void> {
 	let lastErr: unknown;
+	let lastCheck: 'ok' | 'missing' | 'unknown' = 'unknown';
 	for (let attempt = 1; attempt <= 3; attempt++) {
 		const client = new FtpClient(30000);
 		try {
@@ -71,21 +75,22 @@ export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, r
 			lastErr = e;
 			client.close();
 			const m = String((e as Error)?.message ?? e);
-			// Bambu routinely drops the FTPS control connection at the END of a transfer — the file is
-			// already uploaded. A late "Connection closed"/reset means success, not failure (and the
-			// printer often won't answer a follow-up SIZE either). Trust it.
-			if (/clos|reset|epipe|econnaborted|aborted/i.test(m) && !/\b550\b|\b530\b/.test(m)) return;
-			// Otherwise it may still have landed — check the size, then retry.
-			if (await ftpsVerify(ip, accessCode, remoteName, data.length)) return;
+			if (/\b530\b|not logged|login/i.test(m)) throw new Error('printer rejected the login — check the LAN access code.');
+			// Did the file actually land? Bambu drops the control connection at end-of-transfer, so a
+			// "closed" error with a confirmed file is success; a confirmed-missing file is a real
+			// failure (retry); if we can't check, only trust a late close.
+			lastCheck = await ftpsCheck(ip, accessCode, remoteName, data.length);
+			if (lastCheck === 'ok') return;
+			if (lastCheck === 'unknown' && /clos|reset|epipe|econnaborted|aborted/i.test(m) && !/\b550\b/.test(m)) return;
 			await new Promise((r) => setTimeout(r, 800 * attempt));
 		}
 	}
 	const msg = String((lastErr as Error)?.message ?? lastErr);
-	// 550 = the printer refused to write the file — almost always a storage problem.
-	if (/\b550\b/.test(msg)) {
-		throw new Error("upload refused (550) — the printer can't store the file. Insert a working microSD card (P1/A1 need one for LAN prints), make sure it isn't full, and retry.");
+	// The file never landed → almost always no/failed storage on the printer.
+	if (lastCheck === 'missing' || /\b550\b/.test(msg)) {
+		throw new Error("the printer couldn't store the print file — insert a working microSD card (P1/A1 need one for LAN prints) and make sure it isn't full, then resubmit.");
 	}
-	throw new Error(`FTPS upload failed after 3 tries: ${msg}`);
+	throw new Error(`upload failed after 3 tries: ${msg}`);
 }
 
 /** Publish the `project_file` print command over the printer's local MQTT (port 8883). */

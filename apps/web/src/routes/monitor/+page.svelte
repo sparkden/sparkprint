@@ -14,7 +14,8 @@
 	});
 
 	const printers = $derived(data.printers);
-	const free = $derived(printers.filter((p) => p.status === 'idle' && p.online).length);
+	const free = $derived(printers.filter((p) => p.status === 'idle' && p.online && !p.jobStatus).length);
+	const sendingOn = (p: (typeof printers)[number]) => p.jobStatus === 'sending' || p.jobStatus === 'ready';
 	const printing = $derived(printers.filter((p) => p.status === 'printing').length);
 	const ready = $derived(printers.filter((p) => p.status === 'finished').length);
 
@@ -73,7 +74,8 @@
 						<p class="text-lg font-bold text-ink">{p.name}</p>
 						<p class="text-xs text-muted-ink">{p.model}</p>
 					</div>
-					{#if p.status === 'idle' && p.online}<span class="badge badge-success">Free</span>
+					{#if sendingOn(p)}<span class="badge badge-spark">Starting…</span>
+					{:else if p.status === 'idle' && p.online}<span class="badge badge-success">Free</span>
 					{:else if p.status === 'printing'}<span class="badge badge-spark">Printing</span>
 					{:else if p.status === 'finished'}<span class="badge badge-warning">Ready</span>
 					{:else if !p.online}<span class="badge badge-neutral">Offline</span>
@@ -123,6 +125,16 @@
 						{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 						<button class="btn btn-primary w-full"><Icon name="check" size={16} /> Picked up — check out</button>
 					</form>
+				{:else if sendingOn(p)}
+					<div class="mt-6 text-center">
+						<p class="text-lg font-bold text-spark-deep">Starting…</p>
+						<p class="mt-1 text-xs text-muted-ink truncate">{p.modelName ?? p.jobName ?? 'Sending file to the printer'}</p>
+						<form method="POST" action="?/stop" use:enhance class="mt-3">
+							<input type="hidden" name="jobId" value={p.jobId} />
+							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
+							<button class="btn btn-ghost btn-sm text-danger">Cancel</button>
+						</form>
+					</div>
 				{:else if p.status === 'idle' && p.online}
 					<p class="mt-6 text-center text-2xl font-bold text-success">Available</p>
 				{:else}
