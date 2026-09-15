@@ -25,10 +25,17 @@ case "$CMD" in
 		URL="${2:?A monitor URL is required}"
 		echo "→ Installing kiosk packages (cage + chromium)…"
 		export DEBIAN_FRONTEND=noninteractive
-		apt-get update -qq || true
-		apt-get install -y -qq cage seatd chromium fonts-dejavu-core \
-			|| apt-get install -y -qq cage seatd chromium-browser fonts-dejavu-core \
-			|| { echo "Package install failed — is this Debian/Raspberry Pi OS?"; exit 1; }
+		# Wait up to 5 min for any other apt/dpkg run (e.g. Pi OS auto-updates) to release the lock,
+		# both by polling and by asking apt itself to wait.
+		APT="apt-get -o DPkg::Lock::Timeout=300"
+		for _ in $(seq 1 100); do
+			fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || break
+			echo "  Waiting for another apt process to finish…"; sleep 3
+		done
+		$APT update -qq || true
+		$APT install -y -qq cage seatd chromium fonts-dejavu-core \
+			|| $APT install -y -qq cage seatd chromium-browser fonts-dejavu-core \
+			|| { echo "Package install failed. Another apt process may still be running — try again in a minute, or check: ps aux | grep apt"; exit 1; }
 		CHROME="$(chromium_bin)" || { echo "Chromium not found after install."; exit 1; }
 
 		systemctl enable --now seatd >/dev/null 2>&1 || true
