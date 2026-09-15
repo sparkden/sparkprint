@@ -417,7 +417,22 @@ export async function rejectJob(jobId: string, orgId: string, actorId: string, n
 }
 
 // ── Cancel ────────────────────────────────────────────────────────────────────
-export async function cancelJob(jobId: string, orgId: string, actorId: string) {
+/** Force a job to completed and free its printer — the board's "mark completed" (e.g. telemetry
+ *  missed the finish, or an operator confirming a print is done). */
+export async function markDone(jobId: string, orgId: string, actorId?: string) {
+	const [job] = await db.select().from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, orgId))).limit(1);
+	if (!job) return { ok: false, error: 'Not found' };
+	if (['completed', 'canceled', 'rejected'].includes(job.status)) return { ok: false, error: 'Already finished' };
+	db.transaction((tx) => {
+		tx.update(printJobs).set({ status: 'completed', finishedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId)).run();
+		if (job.printerId) tx.update(printers).set({ status: 'idle', currentJobId: null, progressPct: null, updatedAt: new Date() }).where(eq(printers.id, job.printerId)).run();
+	});
+	await logEvent(jobId, 'status_change', 'Marked completed', {}, actorId);
+	if (job.printerId) await promoteQueue(orgId);
+	return { ok: true };
+}
+
+export async function cancelJob(jobId: string, orgId: string, actorId?: string) {
 	const [job] = await db
 		.select()
 		.from(printJobs)

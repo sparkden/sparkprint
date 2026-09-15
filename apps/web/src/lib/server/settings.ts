@@ -13,3 +13,10 @@ export async function setSetting(key: string, value: string): Promise<void> {
 	if (existing === null) await db.insert(appSettings).values({ key, value, updatedAt: new Date() });
 	else await db.update(appSettings).set({ value, updatedAt: new Date() }).where(eq(appSettings.key, key));
 }
+
+/** The org a kiosk token grants access to (the no-login lab board), or null if the token is wrong. */
+export async function kioskOrgId(token: string | null | undefined): Promise<string | null> {
+	if (!token) return null;
+	const stored = await getSetting('kiosk.token');
+	return stored && token === stored ? await getSetting('kiosk.orgId') : null;
+}

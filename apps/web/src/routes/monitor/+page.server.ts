@@ -2,19 +2,25 @@ import { redirect, fail } from '@sveltejs/kit';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { printers, printJobs, users, models, orgs } from '$lib/server/db/schema';
-import { checkoutJob } from '$lib/server/jobs';
-import { getSetting } from '$lib/server/settings';
+import { checkoutJob, cancelJob, markDone } from '$lib/server/jobs';
+import { manager } from '$lib/server/bambu/manager';
+import { kioskOrgId } from '$lib/server/settings';
+import { getWeather } from '$lib/server/weather';
 import type { Actions, PageServerLoad } from './$types';
 
 // Resolve the org for a kiosk request (a physical lab display with no login) from its token.
 async function kioskOrg(token: string | null): Promise<{ orgId: string; orgName: string } | null> {
-	if (!token) return null;
-	const stored = await getSetting('kiosk.token');
-	if (!stored || token !== stored) return null;
-	const orgId = await getSetting('kiosk.orgId');
+	const orgId = await kioskOrgId(token);
 	if (!orgId) return null;
 	const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId)).limit(1);
 	return o ? { orgId, orgName: o.name } : null;
+}
+
+// Who is acting: a signed-in member or the kiosk token. Returns the org + actor (null for kiosk).
+async function actor(locals: App.Locals, url: URL, fd?: FormData): Promise<{ orgId: string; actorId?: string } | null> {
+	if (locals.user) return { orgId: locals.user.orgId, actorId: locals.user.id };
+	const k = await kioskOrg(url.searchParams.get('kiosk') || String(fd?.get('kiosk') || ''));
+	return k ? { orgId: k.orgId } : null;
 }
 
 // Fullscreen lab monitor for the shared lab computer. Any signed-in member can view + check out
@@ -42,7 +48,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			jobName: printJobs.name,
 			jobStatus: printJobs.status,
 			ownerName: users.name,
+			modelId: printJobs.modelId,
 			modelName: models.name,
+			hasThumb: models.thumbnailKey,
 			colorRequest: printJobs.colorRequest
 		})
 		.from(printers)
@@ -67,25 +75,37 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		orgName: user.orgName,
 		isStaff: !kiosk && ['owner', 'admin', 'teacher'].includes(user.role),
 		kiosk,
-		kioskToken: kiosk ? (url.searchParams.get('kiosk') ?? '') : ''
+		kioskToken: kiosk ? (url.searchParams.get('kiosk') ?? '') : '',
+		weather: await getWeather()
 	};
 };
 
 export const actions: Actions = {
+	// Finished print pulled off the bed → completed + frees the printer.
 	checkout: async ({ request, locals, url }) => {
-		const user = locals.user;
 		const fd = await request.formData();
-		// Signed-in member, or the physical kiosk (token, carried in the URL or the form) — both can
-		// check a finished print off the bed.
-		let orgId: string | null = user?.orgId ?? null;
-		let actorId: string | undefined = user?.id;
-		if (!orgId) {
-			const k = await kioskOrg(url.searchParams.get('kiosk') || String(fd.get('kiosk') || ''));
-			if (k) { orgId = k.orgId; actorId = undefined; }
-		}
-		if (!orgId) return fail(401, { error: 'Sign in' });
-		const r = await checkoutJob(String(fd.get('jobId')), orgId, actorId);
-		if (!r.ok) return fail(400, { error: r.error });
-		return { success: true };
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(401, { error: 'Sign in' });
+		const r = await checkoutJob(String(fd.get('jobId')), a.orgId, a.actorId);
+		return r.ok ? { success: true } : fail(400, { error: r.error });
+	},
+	// Force a print completed + free the printer (telemetry missed the finish, or confirming done).
+	complete: async ({ request, locals, url }) => {
+		const fd = await request.formData();
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(401, { error: 'Sign in' });
+		const r = await markDone(String(fd.get('jobId')), a.orgId, a.actorId);
+		return r.ok ? { success: true } : fail(400, { error: r.error });
+	},
+	// Stop a running print on the machine, then cancel the job + free the printer.
+	stop: async ({ request, locals, url }) => {
+		const fd = await request.formData();
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(401, { error: 'Sign in' });
+		const jobId = String(fd.get('jobId'));
+		const [job] = await db.select({ printerId: printJobs.printerId }).from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, a.orgId))).limit(1);
+		if (job?.printerId) { try { await manager().stop(job.printerId); } catch { /* offline */ } }
+		const r = await cancelJob(jobId, a.orgId, a.actorId);
+		return r.ok ? { success: true } : fail(400, { error: r.error });
 	}
 };
