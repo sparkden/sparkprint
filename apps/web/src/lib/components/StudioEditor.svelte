@@ -17,8 +17,13 @@
 		reference = false,
 		embedded = false,
 		insetRight = 0,
-		onstats
-	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; insetRight?: number; onstats?: (s: Stats) => void } = $props();
+		onstats,
+		onerror
+	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; insetRight?: number; onstats?: (s: Stats) => void; onerror?: (msg: string) => void } = $props();
+
+	// The 3D engine loads async in onMount; files chosen before it's ready are queued here.
+	let ready = false;
+	let pendingFiles: File[] = [];
 
 	const FALLBACK: LabColor = { colorHex, filamentType: 'PLA' };
 	function baseColor(): LabColor {
@@ -280,7 +285,7 @@
 	}
 
 	export async function addObject(file: File) {
-		if (!THREE) return;
+		if (!ready) { pendingFiles.push(file); return; } // engine still loading — run it once ready
 		loading = true; errorMsg = null;
 		try {
 			const buf = await file.arrayBuffer();
@@ -316,6 +321,7 @@
 			addGeometry(geometry, file.name.replace(/\.(stl|obj|3mf)$/i, ''));
 		} catch (e: any) {
 			errorMsg = e?.message ?? 'Could not load model.';
+			onerror?.(errorMsg ?? 'Could not load model.');
 		} finally {
 			loading = false;
 		}
@@ -730,6 +736,7 @@
 	onMount(() => {
 		let raf = 0, ro: ResizeObserver;
 		(async () => {
+		 try {
 			THREE = await import('three');
 			({ STLExporter } = await import('three/addons/exporters/STLExporter.js'));
 			const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
@@ -800,6 +807,16 @@
 			function resize() { const w = container.clientWidth, h = container.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 			ro = new ResizeObserver(resize); ro.observe(container); resize();
 			(function animate() { raf = requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); })();
+
+			// Engine ready — run any files chosen while it was still loading.
+			ready = true;
+			const queued = pendingFiles; pendingFiles = [];
+			for (const f of queued) await addObject(f);
+		 } catch (e: any) {
+			const msg = 'The 3D editor failed to start: ' + (e?.message ?? e);
+			errorMsg = msg; onerror?.(msg);
+			console.error('[StudioEditor] init failed', e);
+		 }
 		})();
 		return () => { cancelAnimationFrame(raf); ro?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerup', onPointerUp); renderer?.dispose?.(); if (renderer?.domElement && container?.contains(renderer.domElement)) container.removeChild(renderer.domElement); };
 	});

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { untrack } from 'svelte';
 	import { unzipSync, strFromU8 } from 'fflate';
 	import StudioEditor from '$lib/components/StudioEditor.svelte';
 	import Icon from '$lib/components/Icon.svelte';
@@ -120,14 +121,18 @@
 	// Track object count from BOTH the stats callback and directly after a load, so the empty-state
 	// overlay reliably lifts once a model is in the editor.
 	let objectCount = $state(0);
+	let editorError = $state<string | null>(null);
 	const hasModel = $derived(objectCount > 0);
 	const canSlice = $derived(hasModel && !!selected);
 	const canSubmit = $derived(hasModel && !!selected && !!name);
 
 	// Keep un-recolored objects on the picked color (single-color path); per-object colors set in
-	// the editor's object list stay put.
+	// the editor's object list stay put. untrack() so this effect only depends on `selected` —
+	// setDefaultColor reads+writes the editor's object list, which would otherwise self-retrigger
+	// the effect (effect_update_depth_exceeded).
 	$effect(() => {
-		if (selected) editor?.setDefaultColor?.(selected);
+		const c = selected;
+		if (c) untrack(() => editor?.setDefaultColor?.(c));
 	});
 
 	const QUALITY = [
@@ -159,12 +164,13 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
 				<div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-spark-soft text-spark-deep"><Icon name="upload" size={28} /></div>
 				<div class="text-center"><p class="text-lg font-semibold text-ink">Drop a model or click to browse</p><p class="text-sm text-muted-ink">STL, OBJ, or 3MF · add as many as you like</p></div>
+				{#if editorError}<div class="mt-2 max-w-md rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{editorError}</div>{/if}
 			</button>
 		{/if}
 	</div>
