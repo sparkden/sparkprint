@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import { db } from './db';
 import {
 	printJobs,
@@ -27,6 +27,14 @@ export async function logEvent(
 	actorId?: string | null
 ) {
 	await db.insert(jobEvents).values({ jobId, type, message, data, actorId: actorId ?? null });
+}
+
+/** Log an event only if it differs from the job's most recent one — avoids timeline spam from the
+ * every-20s dispatch retry repeating the same "waiting" message. */
+async function logEventOnce(jobId: string, type: string, message: string) {
+	const [last] = await db.select({ message: jobEvents.message }).from(jobEvents).where(eq(jobEvents.jobId, jobId)).orderBy(desc(jobEvents.createdAt)).limit(1);
+	if (last?.message === message) return;
+	await logEvent(jobId, type, message);
 }
 
 // ── Color matching ────────────────────────────────────────────────────────────
@@ -99,6 +107,10 @@ async function preEstimate(job: typeof printJobs.$inferSelect) {
 export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 	const [job] = await db.select().from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
 	if (!job) return 'queued';
+	// CRITICAL: only ever send a job that hasn't been sent yet. A 'sending'/'printing'/'awaiting_pickup'
+	// job has already gone to the printer — re-dispatching it re-prints (knocking the running print
+	// off the bed). This guard makes a double-send impossible regardless of who calls dispatch.
+	if (job.status !== 'queued' && job.status !== 'ready') return 'queued';
 	const requests = job.colorRequest as ColorRequest[];
 
 	const candidates = await db
@@ -172,6 +184,21 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 		const threeMf = await readBuffer(job.gcodeKey);
 		// Bambu ams_mapping: index = filament slot in the 3mf; value = global AMS tray id (ams*4+slot).
 		const amsMapping = mapping.map((m) => m.amsIndex * 4 + m.slotIndex);
+
+		// CLAIM the job (queued/ready → sending) + the printer BEFORE the network send. This is the
+		// point of no return: once claimed, the job never auto-retries. A concurrent/queued dispatch
+		// will see it's no longer queued/ready and bail. Conditional update = atomic claim.
+		const claimed = db.transaction((tx) => {
+			const res = tx
+				.update(printJobs)
+				.set({ status: 'sending', printerId: p.id, colorMapping: mapping, startedAt: new Date(), failureReason: null, updatedAt: new Date() })
+				.where(and(eq(printJobs.id, jobId), inArray(printJobs.status, ['queued', 'ready'])))
+				.run();
+			if (res.changes > 0) tx.update(printers).set({ currentJobId: jobId, updatedAt: new Date() }).where(eq(printers.id, p.id)).run();
+			return res.changes > 0;
+		});
+		if (!claimed) return 'queued'; // already claimed elsewhere — never double-send
+
 		try {
 			await lanPrint({
 				ip: p.ipAddress,
@@ -184,19 +211,17 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				bedType: 'textured_plate',
 				plateIdx: 1
 			});
+			await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });
 		} catch (e) {
 			const msg = (e as Error).message;
-			await db.update(printJobs).set({ status: 'ready', printerId: p.id, colorMapping: mapping, failureReason: msg, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-			await logEvent(jobId, 'error', `Couldn't start the print on ${p.name}: ${msg}. Check the printer's IP/access code and that the server is on the same network.`, { printerId: p.id });
-			return 'queued';
+			// The send errored — but with Bambu, "Connection closed" often fires AFTER the file
+			// uploaded and the print already started. We must NOT revert to a retryable state or we
+			// risk re-sending and knocking a running print off the bed. Leave it 'sending' (occupied)
+			// and let telemetry confirm; if it truly didn't start, an admin retries via "Mark as free".
+			await db.update(printJobs).set({ failureReason: msg, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+			await logEvent(jobId, 'dispatch', `Send to ${p.name} reported: ${msg}. If the print didn’t start, use "Mark as free" and resubmit.`, { printerId: p.id });
 		}
-
-		db.transaction((tx) => {
-			tx.update(printJobs).set({ printerId: p.id, colorMapping: mapping, status: 'sending', startedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId)).run();
-			tx.update(printers).set({ currentJobId: jobId, updatedAt: new Date() }).where(eq(printers.id, p.id)).run();
-		});
-		await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });
-		return 'printing';
+		return 'printing'; // claimed → not queued anymore, regardless of the send outcome
 	}
 
 	await db.update(printJobs).set({ status: 'queued', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
@@ -212,7 +237,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 	else if (!printable.some((p) => p.online)) reason = 'No printer is online — check each printer’s LAN IP + access code, LAN mode, and that the Pi is on the same network.';
 	else if (!printable.some(free)) reason = 'Printers are online but busy — the job will start when one is free (finished prints must be checked out first).';
 	else reason = 'No free printer has the requested color loaded — load the color on an available printer (Diagnostics shows which), or pick another color.';
-	await logEvent(jobId, 'queue', reason);
+	await logEventOnce(jobId, 'queue', reason); // deduped — don't spam the timeline every retry
 	return 'queued';
 }
 

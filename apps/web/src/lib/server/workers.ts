@@ -78,8 +78,10 @@ async function sliceJob(jobId: string) {
 
 /** Re-enqueue work that was in flight when the server last stopped. */
 async function recoverJobs() {
-	// Jobs assigned + sliced but not yet on a printer → dispatch again.
-	const ready = await db.select({ id: printJobs.id }).from(printJobs).where(inArray(printJobs.status, ['ready', 'sending']));
+	// Jobs sliced + assigned but NOT yet sent → dispatch. NOTE: never re-dispatch 'sending' — that
+	// job already went to the printer; re-sending it on every restart re-prints (and knocks the
+	// running print off the bed). 'sending' is left to telemetry to resolve.
+	const ready = await db.select({ id: printJobs.id }).from(printJobs).where(eq(printJobs.status, 'ready'));
 	for (const j of ready) enqueueDispatch(j.id);
 	// Jobs approved/queued that still need slicing (have a model, no gcode yet) → slice again.
 	const queued = await db.select({ id: printJobs.id, gcodeKey: printJobs.gcodeKey }).from(printJobs).where(inArray(printJobs.status, ['queued', 'slicing']));
@@ -92,29 +94,14 @@ async function recoverJobs() {
  * now it goes automatically within ~20s of a printer coming online and idle.
  */
 async function retryPending() {
+	// Only re-attempt jobs that have NOT been sent yet (queued/ready). A 'sending' job already went
+	// to the printer — it is NEVER re-dispatched here (that caused a re-print loop). It's resolved by
+	// telemetry (→ printing → completed) or, if it truly didn't start, manually via "Mark as free".
 	const rows = await db
 		.select({ id: printJobs.id })
 		.from(printJobs)
 		.where(and(inArray(printJobs.status, ['queued', 'ready']), isNotNull(printJobs.gcodeKey)));
 	for (const j of rows) enqueueDispatch(j.id);
-
-	// Recover a send that never took: 'sending' for >4 min while its printer is online + idle (so the
-	// print clearly didn't start) → free the printer and re-dispatch. Guarded on idle so we never
-	// re-send to a printer that actually started the job.
-	const sending = await db
-		.select({ id: printJobs.id, printerId: printJobs.printerId, startedAt: printJobs.startedAt })
-		.from(printJobs)
-		.where(eq(printJobs.status, 'sending'));
-	for (const j of sending) {
-		if (!j.printerId || !j.startedAt || Date.now() - new Date(j.startedAt).getTime() < 4 * 60_000) continue;
-		const [p] = await db.select({ status: printers.status, online: printers.online }).from(printers).where(eq(printers.id, j.printerId)).limit(1);
-		if (p?.online && p.status === 'idle') {
-			await db.update(printers).set({ currentJobId: null, updatedAt: new Date() }).where(eq(printers.id, j.printerId));
-			await db.update(printJobs).set({ status: 'ready', updatedAt: new Date() }).where(eq(printJobs.id, j.id));
-			await logEvent(j.id, 'dispatch', 'Retrying — the printer didn’t start the last send.');
-			enqueueDispatch(j.id);
-		}
-	}
 }
 
 export async function startWorkers() {
