@@ -41,6 +41,9 @@ case "$CMD" in
 		systemctl enable --now seatd >/dev/null 2>&1 || true
 		usermod -aG video,render,input,seat,tty "$APP_USER" 2>/dev/null || true
 		UID_N="$(id -u "$APP_USER")"
+		# The kiosk runs on tty1 (the screen shown at boot). Stop the console login there so it doesn't
+		# hold the display with a "login:" prompt. (Restored on disable.)
+		systemctl disable --now getty@tty1.service >/dev/null 2>&1 || true
 
 		# Launch wrapper: minimal Wayland kiosk (cage) running one fullscreen Chromium tab.
 		cat > "$LAUNCH" <<LAUNCHEOF
@@ -58,14 +61,17 @@ LAUNCHEOF
 		cat > "$UNIT" <<UNITEOF
 [Unit]
 Description=SparkPrint kiosk display
-After=systemd-user-sessions.service seatd.service network-online.target sparkprint.service
+After=systemd-user-sessions.service seatd.service network-online.target sparkprint.service getty@tty1.service
+Conflicts=getty@tty1.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=$APP_USER
 PAMName=login
-TTYPath=/dev/tty7
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
 StandardInput=tty
 StandardOutput=journal
 StandardError=journal
@@ -91,6 +97,7 @@ UNITEOF
 	disable)
 		systemctl disable --now sparkprint-kiosk >/dev/null 2>&1 || true
 		rm -f "$UNIT"; systemctl daemon-reload
+		systemctl enable --now getty@tty1.service >/dev/null 2>&1 || true # restore the console login
 		echo "✓ Kiosk disabled."
 		;;
 	status)
