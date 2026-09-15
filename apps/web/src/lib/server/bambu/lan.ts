@@ -142,11 +142,13 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 					layer_inspect: false,
 					timelapse: false,
 					use_ams: params.useAms,
-					// External spool (no AMS) → empty mapping, not [0].
-					ams_mapping: params.useAms ? params.amsMapping : []
+					ams_mapping: params.useAms ? params.amsMapping : [0]
 				}
 			};
-			client.publish(`device/${params.serial}/request`, JSON.stringify(cmd), { qos: 0 }, (err) => {
+			// qos 1 so the command is actually delivered before we close (a force-closed qos-0 publish
+			// can be dropped before it reaches the printer → "Sent" but nothing prints). The published
+			// flag below still treats a drop AFTER delivery as success, so no false error either.
+			client.publish(`device/${params.serial}/request`, JSON.stringify(cmd), { qos: 1 }, (err) => {
 				published = true;
 				clearTimeout(to);
 				done(err ?? undefined);
