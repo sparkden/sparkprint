@@ -260,6 +260,7 @@ export const printJobs = sqliteTable(
 		estimatedTimeSec: integer('estimated_time_sec'),
 		actualGrams: num('actual_grams'),
 		gcodeKey: text('gcode_key'),
+		finishPhotoKey: text('finish_photo_key'), // camera still taken near the end of the print
 		estimatedCost: num('estimated_cost'),
 		approvedBy: text('approved_by').references(() => users.id, { onDelete: 'set null' }),
 		approvalNote: text('approval_note'),

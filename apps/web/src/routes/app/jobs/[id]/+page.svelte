@@ -23,13 +23,21 @@
 	<div class="grid gap-6 md:grid-cols-5">
 		<!-- Preview -->
 		<div class="md:col-span-2">
-			<div class="card flex h-64 items-center justify-center overflow-hidden bg-soft-paper">
-				{#if job.modelId && data.thumbnailKey}
-					<img src="/files/{job.modelId}/thumb" alt={job.name} class="h-full w-full object-contain" />
-				{:else}
-					<Icon name="box" size={48} class="text-faint-ink" />
-				{/if}
-			</div>
+			{#if job.finishPhotoKey}
+				<!-- Real photo from the printer's camera near the end of the print. -->
+				<div class="card overflow-hidden bg-[#161616]">
+					<img src="/files/{job.id}/finish-photo" alt="Your print on the bed" class="block h-64 w-full object-cover" />
+					<p class="px-3 py-1.5 text-xs text-muted-ink">📷 Photo from the printer — {awaitingPickup ? 'ready to pick up' : 'near the end of the print'}</p>
+				</div>
+			{:else}
+				<div class="card flex h-64 items-center justify-center overflow-hidden bg-soft-paper">
+					{#if job.modelId && data.thumbnailKey}
+						<img src="/files/{job.modelId}/thumb" alt={job.name} class="h-full w-full object-contain" />
+					{:else}
+						<Icon name="box" size={48} class="text-faint-ink" />
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Details -->

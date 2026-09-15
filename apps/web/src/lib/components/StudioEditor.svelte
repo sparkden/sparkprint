@@ -215,6 +215,7 @@
 		if (!renderer) return null;
 		const wasVisible = gizmoHelper?.visible;
 		if (gizmoHelper) gizmoHelper.visible = false;
+		if (objects.length) frameCamera(); // make sure the model is centered + in frame for the shot
 		renderer.render(scene, camera);
 		let url: string | null = null;
 		try { url = renderer.domElement.toDataURL('image/png'); } catch { /* */ }
@@ -375,6 +376,13 @@
 			m.position.z = +(z + fp.d / 2).toFixed(2);
 			dropToPlate(m);
 			x += fp.w + gap; rowD = Math.max(rowD, fp.d);
+		}
+		// Center the whole arrangement on the plate (single models land dead-center).
+		if (objects.length) {
+			const box = new THREE.Box3();
+			for (const o of objects) { const m = meshes.get(o.id); if (m) box.expandByObject(m); }
+			const c = new THREE.Vector3(); box.getCenter(c);
+			for (const o of objects) { const m = meshes.get(o.id); if (m) { m.position.x -= c.x; m.position.z -= c.z; } }
 		}
 		emitStats();
 	}

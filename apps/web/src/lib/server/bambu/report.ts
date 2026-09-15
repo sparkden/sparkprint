@@ -7,6 +7,29 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { printers, amsUnits, amsSlots, printJobs } from '../db/schema';
 import { completeJob, promoteQueue } from '../jobs';
+import { captureFrame } from './camera';
+import { putBuffer } from '../storage';
+
+// Capture the end-of-print camera still once per job (deduped in-process).
+const capturing = new Set<string>();
+async function captureFinishPhoto(printer: typeof printers.$inferSelect, jobId: string) {
+	if (capturing.has(jobId) || !printer.ipAddress || !printer.accessCode) return;
+	capturing.add(jobId);
+	try {
+		const [j] = await db.select({ finishPhotoKey: printJobs.finishPhotoKey }).from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
+		if (!j || j.finishPhotoKey) return; // already have one
+		const frame = await captureFrame(printer.model, printer.ipAddress, printer.accessCode);
+		if (frame && frame.length > 1000) {
+			const key = `org/${printer.orgId}/jobs/${jobId}.finish.jpg`;
+			await putBuffer(key, frame);
+			await db.update(printJobs).set({ finishPhotoKey: key, updatedAt: new Date() }).where(eq(printJobs.id, jobId));
+		}
+	} catch {
+		/* camera off / unreachable — no photo, no problem */
+	} finally {
+		capturing.delete(jobId);
+	}
+}
 
 const STATE_MAP: Record<string, 'idle' | 'printing' | 'paused' | 'error' | 'finished'> = {
 	IDLE: 'idle',
@@ -67,6 +90,10 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 	if (print.nozzle_temper != null) patch.nozzleTemp = numOrNull(print.nozzle_temper)?.toFixed(1);
 	if (print.bed_temper != null) patch.bedTemp = numOrNull(print.bed_temper)?.toFixed(1);
 	await db.update(printers).set(patch).where(eq(printers.id, printer.id));
+
+	// Near the end of a print, grab a camera still so the student can see it before pickup.
+	const pct = numOrNull(print.mc_percent) ?? 0;
+	if (printer.currentJobId && print.gcode_state === 'RUNNING' && pct >= 95) captureFinishPhoto(printer, printer.currentJobId);
 
 	// ── AMS sync ──────────────────────────────────────────────────────────────────
 	const amsList: any[] = print?.ams?.ams ?? [];

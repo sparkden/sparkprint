@@ -3,7 +3,17 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import { COLOR_LIBRARY } from '$lib/colors';
 	let { data, form } = $props();
+
+	let colorSearch = $state('');
+	const colorResults = $derived(
+		(() => {
+			const q = colorSearch.trim().toLowerCase();
+			if (!q) return COLOR_LIBRARY.slice(0, 24);
+			return COLOR_LIBRARY.filter((c) => c.name.toLowerCase().includes(q) || c.hex.toLowerCase().includes(q)).slice(0, 60);
+		})()
+	);
 
 	type Slot = (typeof data.units)[number]['slots'][number];
 	let editing = $state<null | (Slot & { amsIndex: number })>(null);
@@ -170,19 +180,22 @@
 			</label>
 
 			{#if !empty}
-				<!-- Palette -->
+				<!-- Palette + searchable library -->
 				<div>
 					<p class="label">Color</p>
-					<div class="flex flex-wrap gap-2">
-						{#each data.palette as c}
-							<button type="button" title={c.name} onclick={() => pick(c)}
+					<input class="input mb-2" bind:value={colorSearch} placeholder="Search colors — clear, navy blue, brown, teal…" />
+					<div class="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-warm-100 bg-warm-50 p-2">
+						{#each colorResults as c}
+							<button type="button" title="{c.name} · {c.hex}" onclick={() => pick(c)}
 								class="h-8 w-8 rounded-lg border-2 transition-transform hover:scale-110 {colorHex.toLowerCase() === c.hex.toLowerCase() ? 'border-ink' : 'border-warm-300'}"
 								style="background:{c.hex}"></button>
+						{:else}
+							<span class="px-1 py-2 text-xs text-muted-ink">No colors match “{colorSearch}”. Use the picker below.</span>
 						{/each}
 					</div>
 					<div class="mt-3 flex items-center gap-3">
 						<input type="color" bind:value={colorHex} class="h-10 w-12 cursor-pointer rounded border border-warm-300 bg-transparent" />
-						<input class="input flex-1" bind:value={colorName} placeholder="Color name (e.g. Sunflower Yellow)" />
+						<input class="input flex-1" bind:value={colorName} placeholder="Color name (e.g. Dark Navy Blue)" />
 					</div>
 				</div>
 

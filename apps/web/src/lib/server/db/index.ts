@@ -37,7 +37,10 @@ if (!g.__sparkMigrated) {
 	}
 	// Additive columns added after the baseline migration — applied idempotently so we don't have to
 	// hand-edit the drizzle journal. Re-runs throw "duplicate column name", which we ignore.
-	for (const stmt of ['ALTER TABLE ams_slots ADD COLUMN manual_color integer DEFAULT 0 NOT NULL']) {
+	for (const stmt of [
+		'ALTER TABLE ams_slots ADD COLUMN manual_color integer DEFAULT 0 NOT NULL',
+		'ALTER TABLE print_jobs ADD COLUMN finish_photo_key text'
+	]) {
 		try { sqlite.exec(stmt); } catch { /* column already exists */ }
 	}
 	g.__sparkMigrated = true;

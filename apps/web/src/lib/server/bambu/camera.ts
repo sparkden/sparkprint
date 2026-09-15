@@ -134,3 +134,40 @@ function rtspStream(ip: string, accessCode: string): ReadableStream<Uint8Array> 
 export function cameraStream(model: string, ip: string, accessCode: string): ReadableStream<Uint8Array> {
 	return cameraTransport(model) === 'chamber' ? chamberStream(ip, accessCode) : rtspStream(ip, accessCode);
 }
+
+/** Grab a single JPEG still from the printer's camera (for the end-of-print photo). null on failure. */
+export function captureFrame(model: string, ip: string, accessCode: string): Promise<Buffer | null> {
+	return cameraTransport(model) === 'chamber' ? captureChamber(ip, accessCode) : captureRtsp(ip, accessCode);
+}
+
+function captureChamber(ip: string, accessCode: string): Promise<Buffer | null> {
+	return new Promise((resolve) => {
+		let done = false;
+		const socket = tlsConnect({ host: ip, port: 6000, rejectUnauthorized: false, timeout: 10000 }, () => socket.write(chamberAuth(accessCode)));
+		const finish = (b: Buffer | null) => { if (done) return; done = true; try { socket.destroy(); } catch { /* */ } resolve(b); };
+		let buf = Buffer.alloc(0), expect = -1;
+		socket.on('data', (chunk: Buffer) => {
+			buf = Buffer.concat([buf, chunk]);
+			if (expect < 0) { if (buf.length < 16) return; expect = buf.readUInt32LE(0); buf = buf.subarray(16); if (expect <= 0 || expect > 6_000_000) return finish(null); }
+			if (buf.length < expect) return;
+			finish(buf.subarray(0, expect)); // first complete frame
+		});
+		socket.on('error', () => finish(null));
+		socket.on('timeout', () => finish(null));
+		setTimeout(() => finish(null), 10000);
+	});
+}
+
+function captureRtsp(ip: string, accessCode: string): Promise<Buffer | null> {
+	return new Promise((resolve) => {
+		const url = `rtsps://bblp:${accessCode}@${ip}:322/streaming/live/1`;
+		const proc = spawn('ffmpeg', ['-loglevel', 'error', '-rtsp_transport', 'tcp', '-i', url, '-frames:v', '1', '-f', 'image2', '-q:v', '3', 'pipe:1']);
+		const chunks: Buffer[] = [];
+		let done = false;
+		const finish = () => { if (done) return; done = true; try { proc.kill('SIGKILL'); } catch { /* */ } resolve(chunks.length ? Buffer.concat(chunks) : null); };
+		proc.stdout?.on('data', (c: Buffer) => chunks.push(c));
+		proc.on('close', finish);
+		proc.on('error', () => { done = true; resolve(null); });
+		setTimeout(finish, 15000);
+	});
+}

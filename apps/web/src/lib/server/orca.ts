@@ -233,6 +233,11 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		`${machinePath};${overridePath}`,
 		'--load-filaments',
 		filamentPaths,
+		// Auto-arrange onto the plate before slicing. Bambu's plate origin is a corner, but our editor
+		// exports models centered at (0,0); without this they'd slice half-off the bed → prints in air
+		// → spaghetti. Arrange centers/places them properly.
+		'--arrange',
+		'1',
 		'--slice',
 		'0',
 		'--export-3mf',
