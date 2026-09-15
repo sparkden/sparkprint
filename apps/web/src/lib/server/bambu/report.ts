@@ -96,8 +96,12 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 				.from(amsSlots)
 				.where(and(eq(amsSlots.amsUnitId, amsUnitId), eq(amsSlots.slotIndex, slotIndex)))
 				.limit(1);
-			// Preserve a manually-set color/name when the printer doesn't report one (common with
-			// third-party filament that has no RFID) — otherwise every telemetry report would wipe it.
+			// If an admin set this slot's color, it's authoritative — telemetry only refreshes the
+			// remaining%/uuid, never the color/type/empty (the printer can't identify the filament).
+			if (existingSlot?.manualColor) {
+				await db.update(amsSlots).set({ remainingPct: numOrNull(tray.remain) ?? existingSlot.remainingPct, trayUuid: tray.tray_uuid || existingSlot.trayUuid, updatedAt: new Date() }).where(eq(amsSlots.id, existingSlot.id));
+				continue;
+			}
 			const slotVals = {
 				printerId: printer.id,
 				filamentType: empty ? null : tray.tray_type || existingSlot?.filamentType || 'PLA',
@@ -129,6 +133,10 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
 		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT, updatedAt: new Date() }).returning())[0].id;
 		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
+		if (existing?.manualColor) {
+			await db.update(amsSlots).set({ remainingPct: numOrNull(vt.remain) ?? existing.remainingPct, updatedAt: new Date() }).where(eq(amsSlots.id, existing.id));
+			return;
+		}
 		// Only overwrite a manually-set external color when the printer actually reports one.
 		const slotVals = {
 			printerId: printer.id,

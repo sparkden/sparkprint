@@ -29,11 +29,16 @@ if (!g.__sparkMigrated) {
 	if (folder) {
 		try {
 			migrate(db, { migrationsFolder: folder });
-			g.__sparkMigrated = true;
 		} catch (e) {
 			console.error('[db] auto-migrate failed:', (e as Error).message);
 		}
 	} else {
 		console.warn('[db] no migrations folder found — run `npm run db:migrate`');
 	}
+	// Additive columns added after the baseline migration — applied idempotently so we don't have to
+	// hand-edit the drizzle journal. Re-runs throw "duplicate column name", which we ignore.
+	for (const stmt of ['ALTER TABLE ams_slots ADD COLUMN manual_color integer DEFAULT 0 NOT NULL']) {
+		try { sqlite.exec(stmt); } catch { /* column already exists */ }
+	}
+	g.__sparkMigrated = true;
 }

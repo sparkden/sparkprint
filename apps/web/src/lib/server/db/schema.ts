@@ -185,6 +185,9 @@ export const amsSlots = sqliteTable(
 		remainingPct: integer('remaining_pct'),
 		nominalWeightG: integer('nominal_weight_g'),
 		empty: bool('empty').notNull().default(false),
+		// Set when an admin sets the color here → telemetry won't overwrite it (third-party filament
+		// the printer can't identify). Cleared when the slot is cleared.
+		manualColor: bool('manual_color').notNull().default(false),
 		createdAt,
 		updatedAt
 	},

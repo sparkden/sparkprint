@@ -92,6 +92,7 @@ export const actions: Actions = {
 				colorHex: d.empty ? null : d.colorHex.startsWith('#') ? d.colorHex : `#${d.colorHex}`,
 				colorName: d.empty ? null : d.colorName || null,
 				remainingPct: d.empty ? null : d.remainingPct,
+				manualColor: !d.empty, // admin-set → telemetry won't clobber it
 				updatedAt: new Date()
 			})
 			.where(eq(amsSlots.id, d.slotId));
@@ -170,8 +171,8 @@ export const actions: Actions = {
 		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
 		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT }).returning())[0].id;
 		const vals = d.clear
-			? { printerId: printer.id, filamentType: null, colorHex: null, colorName: null, empty: true, updatedAt: new Date() }
-			: { printerId: printer.id, filamentType: d.filamentType, colorHex: d.colorHex.toUpperCase(), colorName: d.colorName || null, empty: false, remainingPct: 100, updatedAt: new Date() };
+			? { printerId: printer.id, filamentType: null, colorHex: null, colorName: null, empty: true, manualColor: false, updatedAt: new Date() }
+			: { printerId: printer.id, filamentType: d.filamentType, colorHex: d.colorHex.toUpperCase(), colorName: d.colorName || null, empty: false, remainingPct: 100, manualColor: true, updatedAt: new Date() };
 		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
 		if (existing) await db.update(amsSlots).set(vals).where(eq(amsSlots.id, existing.id));
 		else await db.insert(amsSlots).values({ amsUnitId: unitId, slotIndex: 0, ...vals });
