@@ -40,7 +40,12 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		}))
 	);
 
-	return { printer, units: unitsWithSlots, palette: BAMBU_BASIC };
+	// The external spool lives as a pseudo-unit (amsIndex 254). Split it out from the AMS list.
+	const externalUnit = unitsWithSlots.find((u) => u.amsIndex === 254);
+	const amsOnly = unitsWithSlots.filter((u) => u.amsIndex !== 254);
+	const externalSpool = externalUnit?.slots?.[0] ?? null;
+
+	return { printer, units: amsOnly, externalSpool, palette: BAMBU_BASIC };
 };
 
 const slotSchema = z.object({
@@ -133,6 +138,35 @@ export const actions: Actions = {
 		if (!printer) return fail(404, { error: 'Printer not found' });
 		const ok = await manager().unloadFilament(printer.id);
 		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload — the printer may be offline or blocking third-party control commands.' };
+	},
+
+	// Set the external spool color for a printer without an AMS (single-color, prints use_ams=false).
+	setSpool: async ({ request, params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const fd = await request.formData();
+		const parsed = z
+			.object({
+				filamentType: z.string().min(1).max(20),
+				colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+				colorName: z.string().max(40).optional(),
+				clear: z.coerce.boolean().optional()
+			})
+			.safeParse({ filamentType: fd.get('filamentType') || 'PLA', colorHex: fd.get('colorHex'), colorName: fd.get('colorName') ?? undefined, clear: fd.get('clear') === 'true' });
+		if (!parsed.success) return fail(400, { error: 'Pick a filament type and a valid color.' });
+		const d = parsed.data;
+
+		const EXT = 254;
+		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
+		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT }).returning())[0].id;
+		const vals = d.clear
+			? { printerId: printer.id, filamentType: null, colorHex: null, colorName: null, empty: true, updatedAt: new Date() }
+			: { printerId: printer.id, filamentType: d.filamentType, colorHex: d.colorHex.toUpperCase(), colorName: d.colorName || null, empty: false, remainingPct: 100, updatedAt: new Date() };
+		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
+		if (existing) await db.update(amsSlots).set(vals).where(eq(amsSlots.id, existing.id));
+		else await db.insert(amsSlots).values({ amsUnitId: unitId, slotIndex: 0, ...vals });
+		return { success: true, message: d.clear ? 'External spool cleared.' : 'External spool color saved.' };
 	},
 
 	// Clear a stuck 'finished' printer (bed removed) so it can take new jobs again.

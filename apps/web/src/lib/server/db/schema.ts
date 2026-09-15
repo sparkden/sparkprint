@@ -296,6 +296,7 @@ export type ColorRequest = {
 	filamentType: string;
 	colorHex: string;
 	colorName?: string;
+	any?: boolean; // "no preference" — match whatever color is most available
 };
 export type ColorMapping = {
 	filamentIndex: number;

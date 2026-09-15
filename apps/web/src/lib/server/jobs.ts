@@ -44,6 +44,19 @@ type LoadedSlot = {
 
 /** Best matching slot on a printer for one requested color, or null. */
 function matchSlot(req: ColorRequest, slots: LoadedSlot[]): LoadedSlot | null {
+	// "No preference" → take whatever's loaded, preferring the fullest spool (honour filament type
+	// if one was requested, otherwise anything).
+	if (req.any) {
+		let best: LoadedSlot | null = null;
+		let bestRem = -1;
+		for (const s of slots) {
+			if (s.empty || !s.colorHex) continue;
+			if (req.filamentType && s.filamentType && s.filamentType.toUpperCase() !== req.filamentType.toUpperCase()) continue;
+			const rem = s.remainingPct ?? 50;
+			if (rem > bestRem) { best = s; bestRem = rem; }
+		}
+		return best;
+	}
 	let best: LoadedSlot | null = null;
 	let bestDist = Infinity;
 	for (const s of slots) {
@@ -167,7 +180,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				data: threeMf,
 				fileName: `${jobId}.gcode.3mf`,
 				amsMapping,
-				useAms: mapping.length > 0,
+				useAms: p.hasAms && mapping.length > 0, // external-spool printers print without AMS
 				bedType: 'textured_plate',
 				plateIdx: 1
 			});

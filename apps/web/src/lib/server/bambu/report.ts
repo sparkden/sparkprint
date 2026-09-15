@@ -116,6 +116,32 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		if (!printer.hasAms) await db.update(printers).set({ hasAms: true }).where(eq(printers.id, printer.id));
 	}
 
+	// ── External spool (vt_tray) for printers without an AMS ────────────────────────
+	// Stored as a pseudo-unit (amsIndex 254) so its color shows in the picker and matches like any
+	// other slot; dispatch prints it with use_ams=false.
+	const vt = print?.vt_tray;
+	if (!amsList.length && vt && typeof vt === 'object') {
+		const color = normColor(vt.tray_color);
+		const empty = !vt.tray_type || vt.tray_type === '';
+		const EXT = 254;
+		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
+		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT, updatedAt: new Date() }).returning())[0].id;
+		const slotVals = {
+			printerId: printer.id,
+			filamentType: empty ? null : vt.tray_type,
+			filamentBrand: vt.tray_sub_brands || 'External',
+			colorHex: color,
+			colorName: vt.tray_id_name || null,
+			trayUuid: vt.tray_uuid || null,
+			remainingPct: numOrNull(vt.remain),
+			empty,
+			updatedAt: new Date()
+		};
+		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
+		if (existing) await db.update(amsSlots).set(slotVals).where(eq(amsSlots.id, existing.id));
+		else await db.insert(amsSlots).values({ amsUnitId: unitId, slotIndex: 0, ...slotVals });
+	}
+
 	// ── Drive the active job from telemetry ────────────────────────────────────────
 	// Keep the job's status in lockstep with the printer, and — critically — only complete a job
 	// that actually reached 'printing'. Right after dispatch the printer can still be reporting the

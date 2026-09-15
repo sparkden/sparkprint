@@ -122,9 +122,11 @@
 	// overlay reliably lifts once a model is in the editor.
 	let objectCount = $state(0);
 	let editorError = $state<string | null>(null);
+	let anyColor = $state(false); // "no preference" — let the lab pick the most-available color
 	const hasModel = $derived(objectCount > 0);
-	const canSlice = $derived(hasModel && !!selected);
-	const canSubmit = $derived(hasModel && !!selected && !!name);
+	const hasColor = $derived(anyColor || !!selected);
+	const canSlice = $derived(hasModel && hasColor);
+	const canSubmit = $derived(hasModel && hasColor && !!name);
 
 	// Keep un-recolored objects on the picked color (single-color path); per-object colors set in
 	// the editor's object list stay put. untrack() so this effect only depends on `selected` —
@@ -208,6 +210,7 @@
 						if (isSlice ? !canSlice : !canSubmit) { cancel(); return; }
 						// Any paint (multicolor, support or seam) → painted 3MF + one filament per color.
 						const mc = (editor?.multicolor?.() ?? false) || (editor?.hasPaint?.() ?? false);
+						const useAny = anyColor && !mc; // "no preference" only applies to a single-color print
 						if (mc) {
 							const painted = editor?.exportPainted3MF?.();
 							if (painted) formData.set('file', painted, (name || 'model') + '.3mf');
@@ -215,11 +218,12 @@
 						} else {
 							const stl = editor?.exportSTL?.();
 							if (stl) formData.set('file', stl, (name || 'model') + '.stl');
+							if (useAny) formData.set('colorRequest', JSON.stringify([{ any: true, filamentType: 'PLA', colorHex: '#CCCCCC', colorName: 'Any (most available)' }]));
 						}
 						formData.set('meta', JSON.stringify({ bbox: stats!.bbox, volumeMm3: stats!.volumeMm3, triangles: stats!.triangles }));
-						formData.set('colorHex', selected!.colorHex);
-						formData.set('colorName', selected!.colorName ?? '');
-						formData.set('filamentType', selected!.filamentType);
+						formData.set('colorHex', useAny ? '#CCCCCC' : selected!.colorHex);
+						formData.set('colorName', useAny ? 'Any (most available)' : (selected!.colorName ?? ''));
+						formData.set('filamentType', useAny ? 'PLA' : selected!.filamentType);
 						formData.set('layerHeightMm', String(quality));
 						formData.set('infillPct', '15');
 						formData.set('supports', String(supports));
@@ -259,18 +263,23 @@
 					<div><label class="label" for="pn">Print name</label><input class="input" id="pn" name="name" bind:value={name} placeholder="My cool model" required /></div>
 
 					<div>
-						<div class="mb-2 flex items-center justify-between"><span class="label mb-0">Color</span>{#if selected}<span class="text-xs text-muted-ink">{selected.colorName ?? selected.colorHex} · {selected.filamentType}</span>{/if}</div>
+						<div class="mb-2 flex items-center justify-between"><span class="label mb-0">Color</span>{#if anyColor}<span class="text-xs text-muted-ink">No preference</span>{:else if selected}<span class="text-xs text-muted-ink">{selected.colorName ?? selected.colorHex} · {selected.filamentType}</span>{/if}</div>
 						{#if data.colors.length === 0}<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
 						{:else}
-							<div class="flex flex-wrap gap-2">
+							<div class="flex flex-wrap items-center gap-2">
+								<button type="button" title="Let the lab pick whichever color is most available" onclick={() => { anyColor = true; selected = null; invalidatePreview(); }}
+									class="flex h-9 items-center gap-1.5 rounded-lg border-2 px-2.5 text-xs font-medium transition-colors {anyColor ? 'border-ink bg-spark-soft text-spark-deep' : 'border-warm-300 text-soft-ink hover:bg-warm-100'}">
+									<Icon name="spool" size={14} /> No preference
+								</button>
+								<span class="h-6 w-px bg-warm-200"></span>
 								{#each data.colors as c}
-									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => { selected = c; invalidatePreview(); }}
-										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => { selected = c; anyColor = false; invalidatePreview(); }}
+										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {!anyColor && selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
 										{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
 									</button>
 								{/each}
 							</div>
-							<p class="mt-1.5 text-xs text-muted-ink">Recolor individual objects with the paint tools in the editor.</p>
+							<p class="mt-1.5 text-xs text-muted-ink">{anyColor ? 'We’ll route it to whichever printer has the fullest spool loaded.' : 'Recolor individual objects with the paint tools in the editor.'}</p>
 						{/if}
 					</div>
 

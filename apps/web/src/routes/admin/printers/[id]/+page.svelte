@@ -60,6 +60,36 @@
 	{#if form?.message}<div class="mb-4 rounded-lg border border-success/30 bg-success/5 px-3.5 py-2.5 text-sm text-success">{form.message}</div>{/if}
 	{#if form?.error}<div class="mb-4 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-sm text-danger">{form.error}</div>{/if}
 
+	<!-- External spool — the single-color path for printers without an AMS (or the external tray). -->
+	<div class="card mb-6 p-6">
+		<div class="mb-3 flex items-center justify-between gap-3">
+			<div>
+				<h2 class="text-lg font-semibold">External spool</h2>
+				<p class="text-sm text-muted-ink">For printers without an AMS — set the color that's loaded on the spool holder.</p>
+			</div>
+			{#if data.externalSpool && !data.externalSpool.empty}
+				<span class="inline-flex items-center gap-2 text-sm"><span class="h-6 w-6 rounded-md border border-warm-300" style="background:{data.externalSpool.colorHex}"></span>{data.externalSpool.colorName ?? data.externalSpool.colorHex} · {data.externalSpool.filamentType}</span>
+			{/if}
+		</div>
+		<form method="POST" action="?/setSpool" use:enhance class="flex flex-wrap items-end gap-3">
+			<label class="text-sm">Color
+				<input class="input mt-1 h-10 w-16 p-1" type="color" name="colorHex" value={data.externalSpool?.colorHex ?? '#FF5B14'} />
+			</label>
+			<label class="text-sm">Material
+				<select class="select mt-1" name="filamentType" value={data.externalSpool?.filamentType ?? 'PLA'}>
+					{#each ['PLA', 'PLA Matte', 'PETG', 'ABS', 'ASA', 'TPU', 'PLA-CF', 'PA-CF'] as t}<option value={t}>{t}</option>{/each}
+				</select>
+			</label>
+			<label class="text-sm">Name <span class="text-muted-ink">(optional)</span>
+				<input class="input mt-1" name="colorName" placeholder="e.g. Spark Orange" value={data.externalSpool?.colorName ?? ''} />
+			</label>
+			<button class="btn btn-primary btn-sm">Save spool</button>
+			{#if data.externalSpool && !data.externalSpool.empty}
+				<button class="btn btn-ghost btn-sm text-danger" formaction="?/setSpool" name="clear" value="true">Clear</button>
+			{/if}
+		</form>
+	</div>
+
 	{#if data.units.length === 0}
 		<div class="card flex flex-col items-center gap-3 p-10 text-center">
 			<p class="text-sm text-soft-ink">No AMS units yet. They import automatically from the printer, or add one to set colors manually.</p>

@@ -77,7 +77,7 @@ const metaSchema = z.object({
 	triangles: z.number().nonnegative()
 });
 
-const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional() });
+const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional(), any: z.boolean().optional() });
 
 export const actions: Actions = {
 	// Slice the design now and return a preview (rendered plate image + time / filament / layers),
@@ -318,7 +318,7 @@ export const actions: Actions = {
 		const d = parsed.data;
 
 		// One entry per filament in the sliced file (multicolor), else the single picked color.
-		const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional() });
+		const colorItem = z.object({ filamentType: z.string(), colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), colorName: z.string().optional(), any: z.boolean().optional() });
 		let colorRequest: { filamentType: string; colorHex: string; colorName?: string }[] = [{ filamentType: d.filamentType, colorHex: d.colorHex, colorName: d.colorName }];
 		if (d.colorRequest) {
 			let raw: unknown = null;
