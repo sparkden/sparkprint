@@ -141,6 +141,17 @@ class BambuManager {
 			1
 		);
 	}
+	/**
+	 * Load the external spool (the "virtual tray", id 254) — for printers without an AMS. Heats the
+	 * nozzle and feeds from the external spool holder. If it stalls mid-way, call amsControl('resume').
+	 */
+	loadExternal(printerId: string) {
+		return this.command(
+			printerId,
+			{ print: { command: 'ams_change_filament', sequence_id: this.nextSeq(), target: 254, ams_id: 254, slot_id: 254, curr_temp: 220, tar_temp: 220 } },
+			1
+		);
+	}
 	/** Guide an in-progress AMS change: 'resume' | 'done' | 'reset' | 'pause'. */
 	amsControl(printerId: string, action: 'resume' | 'done' | 'reset' | 'pause') {
 		return this.command(printerId, { print: { command: 'ams_control', sequence_id: this.nextSeq(), param: action } }, 1);

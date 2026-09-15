@@ -131,13 +131,22 @@ export const actions: Actions = {
 		return { success: true, message: ok ? 'Reloading from the printer…' : 'Printer not connected — check its LAN IP/access code.' };
 	},
 
-	// Unload the currently-loaded filament back into the AMS.
+	// Unload the currently-loaded filament (works for AMS and the external spool).
 	unloadFilament: async ({ params, locals }) => {
 		const me = requireAdmin(locals.user);
 		const printer = await ownedPrinter(me.orgId, params.id);
 		if (!printer) return fail(404, { error: 'Printer not found' });
 		const ok = await manager().unloadFilament(printer.id);
-		return { success: true, message: ok ? 'Unloading filament…' : 'Sent unload — the printer may be offline or blocking third-party control commands.' };
+		return { success: true, message: ok ? 'Unloading filament… follow the prompt on the printer.' : 'Sent unload — the printer may be offline or blocking third-party control commands.' };
+	},
+
+	// Load the external spool (non-AMS printers). Heats the nozzle and feeds from the spool holder.
+	loadSpool: async ({ params, locals }) => {
+		const me = requireAdmin(locals.user);
+		const printer = await ownedPrinter(me.orgId, params.id);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const ok = await manager().loadExternal(printer.id);
+		return { success: true, message: ok ? 'Loading the external spool… feed the filament when the printer prompts.' : 'Sent load — the printer may be offline or blocking third-party control commands.' };
 	},
 
 	// Set the external spool color for a printer without an AMS (single-color, prints use_ams=false).

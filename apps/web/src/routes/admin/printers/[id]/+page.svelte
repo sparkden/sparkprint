@@ -88,6 +88,18 @@
 				<button class="btn btn-ghost btn-sm text-danger" formaction="?/setSpool" name="clear" value="true">Clear</button>
 			{/if}
 		</form>
+
+		<!-- Physically drive the spool on the printer (heats nozzle; follow the prompt on the screen). -->
+		<div class="mt-4 flex flex-wrap items-center gap-2 border-t border-warm-100 pt-3">
+			<span class="text-sm text-muted-ink">On the printer:</span>
+			<form method="POST" action="?/loadSpool" use:enhance style="display:inline">
+				<button class="btn btn-secondary btn-sm"><Icon name="spool" size={14} /> Load filament</button>
+			</form>
+			<form method="POST" action="?/unloadFilament" use:enhance style="display:inline">
+				<button class="btn btn-ghost btn-sm text-danger"><Icon name="logout" size={14} /> Unload filament</button>
+			</form>
+			<span class="text-xs text-faint-ink">Heats the nozzle — feed/withdraw the filament when prompted on the printer.</span>
+		</div>
 	</div>
 
 	{#if data.units.length === 0}
