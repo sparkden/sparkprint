@@ -281,6 +281,9 @@ chown -R "$APP_USER:$APP_USER" "$ORCA_DIR" 2>/dev/null || true
 step "6/9  Configuration"
 APP_SECRET="$( { [ -f "$ENV_FILE" ] && grep -oP '(?<=^APP_SECRET=").*(?=")' "$ENV_FILE"; } 2>/dev/null || true )"
 [ -n "$APP_SECRET" ] || APP_SECRET="$(openssl rand -hex 32)"
+# Preserve a prior ADMIN_TERMINAL choice on re-run; default on (it's admin-login gated).
+TERMINAL="$( { [ -f "$ENV_FILE" ] && grep -oP '(?<=^ADMIN_TERMINAL=").*(?=")' "$ENV_FILE"; } 2>/dev/null || true )"
+[ -n "$TERMINAL" ] || TERMINAL="on"
 mkdir -p "$APP_DIR/apps/web/.data/storage"
 cat > "$ENV_FILE" <<EOF
 DATABASE_URL="$DATABASE_URL"
@@ -289,12 +292,28 @@ STORAGE_DIR="./.data/storage"
 NODE_ENV="production"
 PORT="$APP_PORT"
 HOST="0.0.0.0"
+# Absolute app dir — used as the web terminal's starting directory.
+SPARKPRINT_DIR="$APP_DIR"
+# Admin web terminal (Manage → Terminal). Set to "off" to disable it entirely.
+ADMIN_TERMINAL="$TERMINAL"
 # Set automatically if you enable the Cloudflare Tunnel below.
 ORIGIN=""
 $( [ -x "$ORCA_APPRUN" ] && echo "ORCA_APPRUN=\"$ORCA_APPRUN\"" )
 EOF
 chown "$APP_USER:$APP_USER" "$ENV_FILE"; chmod 600 "$ENV_FILE"
 ok "Wrote $ENV_FILE"
+
+# Optional: let the admin web terminal run commands as ROOT (via passwordless sudo for $APP_USER).
+SUDOERS="/etc/sudoers.d/sparkprint"
+if [ -f "$SUDOERS" ]; then
+  ok "Web terminal already has root (sudo) access."
+elif askyn "Allow the admin web terminal to run commands as ROOT? Powerful — anyone with admin login could control this machine." n; then
+  echo "$APP_USER ALL=(ALL) NOPASSWD:ALL" > "$SUDOERS"; chmod 440 "$SUDOERS"
+  if visudo -cf "$SUDOERS" >/dev/null 2>&1; then ok "Root access enabled — the terminal's 'root (sudo)' toggle now works."
+  else rm -f "$SUDOERS"; warn "sudoers check failed — root access NOT enabled."; fi
+else
+  ok "Web terminal runs as $APP_USER (no root). Re-run and choose yes to enable root later."
+fi
 
 # ── 7. Build + migrate ────────────────────────────────────────────────────────
 step "7/9  Build & database migration (a few minutes)…"
