@@ -70,7 +70,12 @@ export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, r
 		} catch (e) {
 			lastErr = e;
 			client.close();
-			// The transfer may have finished before the drop — check the uploaded size.
+			const m = String((e as Error)?.message ?? e);
+			// Bambu routinely drops the FTPS control connection at the END of a transfer — the file is
+			// already uploaded. A late "Connection closed"/reset means success, not failure (and the
+			// printer often won't answer a follow-up SIZE either). Trust it.
+			if (/clos|reset|epipe|econnaborted|aborted/i.test(m) && !/\b550\b|\b530\b/.test(m)) return;
+			// Otherwise it may still have landed — check the size, then retry.
 			if (await ftpsVerify(ip, accessCode, remoteName, data.length)) return;
 			await new Promise((r) => setTimeout(r, 800 * attempt));
 		}
@@ -95,7 +100,11 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 			reconnectPeriod: 0,
 			clientId: `sparkprint_lan_${Math.floor(Math.random() * 1e6)}`
 		});
+		let published = false;
+		let settled = false;
 		const done = (err?: Error) => {
+			if (settled) return;
+			settled = true;
 			try {
 				client.end(true);
 			} catch {
@@ -122,15 +131,16 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 					ams_mapping: params.useAms ? params.amsMapping : [0]
 				}
 			};
-			client.publish(`device/${params.serial}/request`, JSON.stringify(cmd), { qos: 1 }, (err) => {
+			client.publish(`device/${params.serial}/request`, JSON.stringify(cmd), { qos: 0 }, (err) => {
+				published = true;
 				clearTimeout(to);
 				done(err ?? undefined);
 			});
 		});
-		client.on('error', (err) => {
-			clearTimeout(to);
-			done(err instanceof Error ? err : new Error(String(err)));
-		});
+		// Once the command has been sent, a subsequent drop is fine — the printer has it. Only a
+		// failure BEFORE we publish is a real error.
+		client.on('error', (err) => { clearTimeout(to); published ? done() : done(err instanceof Error ? err : new Error(String(err))); });
+		client.on('close', () => { if (published) done(); });
 	});
 }
 
