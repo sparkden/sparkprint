@@ -26,22 +26,55 @@ export type LanPrintParams = {
 	plateIdx?: number;
 };
 
-/** Upload the 3mf to the printer's FTP root over implicit FTPS (port 990). */
-export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, remoteName: string): Promise<void> {
-	const client = new FtpClient(20000);
+function ftpAccess(client: FtpClient, ip: string, accessCode: string) {
+	return client.access({
+		host: ip,
+		port: 990,
+		user: 'bblp',
+		password: accessCode,
+		secure: 'implicit',
+		secureOptions: { rejectUnauthorized: false } // printer uses a self-signed cert
+	});
+}
+
+/** Does the file already exist on the printer at the expected size? (fresh connection) */
+async function ftpsVerify(ip: string, accessCode: string, remoteName: string, expected: number): Promise<boolean> {
+	const client = new FtpClient(15000);
 	try {
-		await client.access({
-			host: ip,
-			port: 990,
-			user: 'bblp',
-			password: accessCode,
-			secure: 'implicit',
-			secureOptions: { rejectUnauthorized: false } // printer uses a self-signed cert
-		});
-		await client.uploadFrom(Readable.from(data), remoteName);
+		await ftpAccess(client, ip, accessCode);
+		const size = await client.size(remoteName);
+		return size === expected;
+	} catch {
+		return false;
 	} finally {
 		client.close();
 	}
+}
+
+/**
+ * Upload the 3mf to the printer's FTP root over implicit FTPS (port 990). Bambu printers routinely
+ * drop the control connection right as the transfer completes ("Connection closed") even though the
+ * file uploaded fine — so we retry, and after any error we verify the file's size on a fresh
+ * connection before deciding it really failed.
+ */
+export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, remoteName: string): Promise<void> {
+	let lastErr: unknown;
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		const client = new FtpClient(30000);
+		try {
+			await ftpAccess(client, ip, accessCode);
+			await client.uploadFrom(Readable.from(data), remoteName);
+			client.close();
+			return; // clean success
+		} catch (e) {
+			lastErr = e;
+			client.close();
+			// The transfer may have finished before the drop — check the uploaded size.
+			if (await ftpsVerify(ip, accessCode, remoteName, data.length)) return;
+			await new Promise((r) => setTimeout(r, 800 * attempt));
+		}
+	}
+	throw new Error(`FTPS upload failed after 3 tries: ${(lastErr as Error)?.message ?? lastErr}`);
 }
 
 /** Publish the `project_file` print command over the printer's local MQTT (port 8883). */
