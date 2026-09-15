@@ -240,6 +240,8 @@
 									sliceNote = p ? null : 'No slicer is set up here, so there’s no detailed preview — you can still send it to print.';
 								} else if (result.type === 'failure') {
 									sliceError = (result.data?.sliceError as string) ?? (result.data?.error as string) ?? 'Slicing failed.';
+								} else {
+									sliceError = 'Upload/slice failed — the model may exceed the server upload limit, or the slicer errored. Check the server logs.';
 								}
 								// keep the panel open; don't touch the page form state
 							};

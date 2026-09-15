@@ -292,6 +292,9 @@ STORAGE_DIR="./.data/storage"
 NODE_ENV="production"
 PORT="$APP_PORT"
 HOST="0.0.0.0"
+# Max upload size in bytes (models/sliced files). Default adapter-node limit is only 512 KB, which
+# rejects real models — raise it well past the app's own 80 MB / 200 MB caps.
+BODY_SIZE_LIMIT="268435456"
 # Absolute app dir — used as the web terminal's starting directory.
 SPARKPRINT_DIR="$APP_DIR"
 # Admin web terminal (Manage → Terminal). Set to "off" to disable it entirely.
