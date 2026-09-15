@@ -97,6 +97,24 @@ async function retryPending() {
 		.from(printJobs)
 		.where(and(inArray(printJobs.status, ['queued', 'ready']), isNotNull(printJobs.gcodeKey)));
 	for (const j of rows) enqueueDispatch(j.id);
+
+	// Recover a send that never took: 'sending' for >4 min while its printer is online + idle (so the
+	// print clearly didn't start) → free the printer and re-dispatch. Guarded on idle so we never
+	// re-send to a printer that actually started the job.
+	const sending = await db
+		.select({ id: printJobs.id, printerId: printJobs.printerId, startedAt: printJobs.startedAt })
+		.from(printJobs)
+		.where(eq(printJobs.status, 'sending'));
+	for (const j of sending) {
+		if (!j.printerId || !j.startedAt || Date.now() - new Date(j.startedAt).getTime() < 4 * 60_000) continue;
+		const [p] = await db.select({ status: printers.status, online: printers.online }).from(printers).where(eq(printers.id, j.printerId)).limit(1);
+		if (p?.online && p.status === 'idle') {
+			await db.update(printers).set({ currentJobId: null, updatedAt: new Date() }).where(eq(printers.id, j.printerId));
+			await db.update(printJobs).set({ status: 'ready', updatedAt: new Date() }).where(eq(printJobs.id, j.id));
+			await logEvent(j.id, 'dispatch', 'Retrying — the printer didn’t start the last send.');
+			enqueueDispatch(j.id);
+		}
+	}
 }
 
 export async function startWorkers() {

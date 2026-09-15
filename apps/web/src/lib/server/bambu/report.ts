@@ -3,10 +3,10 @@
  * into the DB: printer telemetry + AMS slots. Also detects print completion to advance
  * the matching print_jobs row.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { printers, amsUnits, amsSlots, printJobs } from '../db/schema';
-import { completeJob } from '../jobs';
+import { completeJob, promoteQueue } from '../jobs';
 
 const STATE_MAP: Record<string, 'idle' | 'printing' | 'paused' | 'error' | 'finished'> = {
 	IDLE: 'idle',
@@ -116,8 +116,35 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		if (!printer.hasAms) await db.update(printers).set({ hasAms: true }).where(eq(printers.id, printer.id));
 	}
 
-	// ── Drive the active job on completion ─────────────────────────────────────────
-	if (print.gcode_state === 'FINISH' && printer.currentJobId) {
-		await completeJob(printer.currentJobId);
+	// ── Drive the active job from telemetry ────────────────────────────────────────
+	// Keep the job's status in lockstep with the printer, and — critically — only complete a job
+	// that actually reached 'printing'. Right after dispatch the printer can still be reporting the
+	// PREVIOUS print's FINISH; completing on that would mark a job done before it ever started.
+	if (printer.currentJobId) {
+		const gs = typeof print.gcode_state === 'string' ? print.gcode_state : '';
+		const jobId = printer.currentJobId;
+		if (gs === 'RUNNING' || gs === 'PREPARE' || gs === 'SLICING') {
+			await db
+				.update(printJobs)
+				.set({ status: 'printing', updatedAt: new Date() })
+				.where(and(eq(printJobs.id, jobId), inArray(printJobs.status, ['sending', 'ready', 'queued', 'printing'])));
+		} else if (gs === 'PAUSE') {
+			await db
+				.update(printJobs)
+				.set({ status: 'paused', updatedAt: new Date() })
+				.where(and(eq(printJobs.id, jobId), inArray(printJobs.status, ['printing', 'sending'])));
+		} else if (gs === 'FINISH') {
+			const [j] = await db.select({ status: printJobs.status }).from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
+			if (j && (j.status === 'printing' || j.status === 'paused')) await completeJob(jobId);
+		} else if (gs === 'FAILED') {
+			const [j] = await db.select({ status: printJobs.status }).from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
+			if (j && ['printing', 'paused', 'sending'].includes(j.status)) {
+				db.transaction((tx) => {
+					tx.update(printJobs).set({ status: 'failed', failureReason: 'Printer reported a failure', finishedAt: new Date(), updatedAt: new Date() }).where(eq(printJobs.id, jobId)).run();
+					tx.update(printers).set({ status: 'error', currentJobId: null, progressPct: null, updatedAt: new Date() }).where(eq(printers.id, printer.id)).run();
+				});
+				await promoteQueue(printer.orgId);
+			}
+		}
 	}
 }
