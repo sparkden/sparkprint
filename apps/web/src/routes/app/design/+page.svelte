@@ -11,6 +11,13 @@
 	const PANEL_W = 340;
 
 	type LabColor = (typeof data.colors)[number];
+	// Render a stored color safely: ensure a leading #, tolerate 8-digit RRGGBBAA, else fall back.
+	function swatch(hex: string | null | undefined): string {
+		if (!hex) return '#cccccc';
+		let h = hex.trim().replace(/^#/, '');
+		if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(h)) return '#cccccc';
+		return '#' + h.slice(0, 6);
+	}
 	let name = $state('');
 	let selected = $state<LabColor | null>(data.colors.find((c) => c.available) ?? data.colors[0] ?? null);
 	let quality = $state(0.2); // layer height
@@ -274,7 +281,7 @@
 								<span class="h-6 w-px bg-warm-200"></span>
 								{#each data.colors as c}
 									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => { selected = c; anyColor = false; invalidatePreview(); }}
-										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {!anyColor && selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {!anyColor && selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{swatch(c.colorHex)}">
 										{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
 									</button>
 								{/each}
@@ -384,7 +391,7 @@
 										<div class="flex flex-wrap gap-2">
 											{#each data.colors as c}
 												<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => (filamentColors[i] = c)}
-													class="relative h-8 w-8 rounded-lg border-2 transition-transform hover:scale-110 {filamentColors[i]?.colorHex === c.colorHex && filamentColors[i]?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+													class="relative h-8 w-8 rounded-lg border-2 transition-transform hover:scale-110 {filamentColors[i]?.colorHex === c.colorHex && filamentColors[i]?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{swatch(c.colorHex)}">
 													{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
 												</button>
 											{/each}
