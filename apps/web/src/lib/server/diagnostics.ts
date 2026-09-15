@@ -88,10 +88,22 @@ async function printerReport(p: typeof printers.$inferSelect): Promise<PrinterRe
 		const mqtt = await probe(p.ipAddress, 8883);
 		const camPort = cameraTransport(p.model) === 'chamber' ? 6000 : 322;
 		const cam = await probe(p.ipAddress, camPort);
+		// Tailor the fix to the exact failure. ECONNREFUSED = host is up but nothing is listening on
+		// 8883 (the local MQTT broker isn't running) — different from a network/routing failure.
+		let mqttFix: string;
+		if (mqtt === 'ECONNREFUSED') {
+			mqttFix = cam === 'OPEN'
+				? 'The printer is reachable but its local MQTT broker (8883) isn’t running. Turn on "LAN Only Mode" on the printer, then reboot it. If it persists, update the printer firmware (older builds don’t expose 8883) or re-generate the access code and re-enter it here.'
+				: 'Nothing is listening on 8883 — enable "LAN Only Mode" and reboot the printer.';
+		} else if (mqtt === 'ETIMEDOUT' || mqtt === 'EHOSTUNREACH') {
+			mqttFix = 'The Pi can’t reach 8883 (network/VLAN/firewall). Put the Pi on the same subnet as the printers; MQTT is TCP 8883.';
+		} else {
+			mqttFix = cam === 'OPEN' ? 'Camera works but 8883 is closed → enable LAN Only Mode + reboot the printer.' : 'Wrong/stale IP, printer off, or different network. Verify the IP and reachability.';
+		}
 		checks.push(
 			mqtt === 'OPEN'
 				? { name: 'MQTT control (8883)', status: 'pass', detail: 'Reachable.' }
-				: { name: 'MQTT control (8883)', status: 'fail', detail: `Not reachable (${mqtt}).`, fix: cam === 'OPEN' ? 'Camera works but 8883 is closed → enable LAN Mode on the printer (turns on the local MQTT broker).' : 'Wrong/stale IP, printer off, or different network. Verify the IP and that the Pi can reach it.' }
+				: { name: 'MQTT control (8883)', status: 'fail', detail: `Not reachable (${mqtt}).`, fix: mqttFix }
 		);
 		checks.push(
 			cam === 'OPEN'

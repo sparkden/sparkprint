@@ -34,6 +34,8 @@ class BambuManager {
 		if (this.started) return;
 		this.started = true;
 		await this.ensureLanConnections();
+		// Keep the DB `online` flag == the real socket state, every 15s.
+		setInterval(() => this.reconcileOnline(), 15000);
 	}
 
 	async ensureLanConnections() {
@@ -86,17 +88,27 @@ class BambuManager {
 				/* ignore malformed */
 			}
 		});
-		// A dropped/failed link means the printer is no longer reachable — reflect that truthfully.
+		// Only a real disconnect clears online. NOTE: do NOT clear online on 'error' — mqtt fires it
+		// on transient blips while the client is still connected, which would wrongly mark a working
+		// printer offline (and it wouldn't recover until a full reconnect). 'close'/'offline' cover
+		// genuine drops, and the periodic reconcile below keeps `online` == the real socket state.
 		client.on('offline', () => setOnline(false));
 		client.on('close', () => setOnline(false));
 		client.on('error', (err: unknown) => {
-			setOnline(false);
 			const now = Date.now();
 			if (now - lastErrLog > 60000) { // throttle: the reconnect loop can fire every few seconds
 				lastErrLog = now;
 				console.error(`[bambu-lan] ${p.name}: ${(err as Error)?.message} (will keep retrying)`);
 			}
 		});
+	}
+
+	/** Reconcile each printer's `online` flag with its socket's real connected state (belt-and-braces
+	 *  so a stray event can't leave the flag wrong). */
+	private reconcileOnline() {
+		for (const { printerId, client } of this.lanConns.values()) {
+			db.update(printers).set({ online: !!client.connected, updatedAt: new Date() }).where(eq(printers.id, printerId)).catch(() => {});
+		}
 	}
 
 	disconnectLanPrinter(printerId: string) {
