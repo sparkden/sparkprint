@@ -96,18 +96,21 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 				.from(amsSlots)
 				.where(and(eq(amsSlots.amsUnitId, amsUnitId), eq(amsSlots.slotIndex, slotIndex)))
 				.limit(1);
-			// If an admin set this slot's color, it's authoritative — telemetry only refreshes the
-			// remaining%/uuid, never the color/type/empty (the printer can't identify the filament).
-			if (existingSlot?.manualColor) {
+			// STICKY COLORS: once a slot has a color (an admin set it, or the printer's first RFID
+			// read), telemetry NEVER changes the color / name / type / loaded state again — it only
+			// refreshes remaining%. Bambu reports a correct name but a junk color for lots of filament,
+			// which was wiping the set color. To re-detect, clear the slot.
+			if (existingSlot?.colorHex) {
 				await db.update(amsSlots).set({ remainingPct: numOrNull(tray.remain) ?? existingSlot.remainingPct, trayUuid: tray.tray_uuid || existingSlot.trayUuid, updatedAt: new Date() }).where(eq(amsSlots.id, existingSlot.id));
 				continue;
 			}
+			// No color yet → adopt whatever the printer reports (or leave empty).
 			const slotVals = {
 				printerId: printer.id,
-				filamentType: empty ? null : tray.tray_type || existingSlot?.filamentType || 'PLA',
-				filamentBrand: tray.tray_sub_brands || existingSlot?.filamentBrand || 'Bambu',
-				colorHex: empty ? null : color ?? existingSlot?.colorHex ?? null,
-				colorName: empty ? null : tray.tray_id_name || existingSlot?.colorName || null,
+				filamentType: empty ? null : tray.tray_type || 'PLA',
+				filamentBrand: tray.tray_sub_brands || 'Bambu',
+				colorHex: empty ? null : color,
+				colorName: empty ? null : tray.tray_id_name || null,
 				trayUuid: tray.tray_uuid || existingSlot?.trayUuid || null,
 				remainingPct: numOrNull(tray.remain),
 				empty,
@@ -133,17 +136,17 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		const [unit] = await db.select().from(amsUnits).where(and(eq(amsUnits.printerId, printer.id), eq(amsUnits.amsIndex, EXT))).limit(1);
 		const unitId = unit?.id ?? (await db.insert(amsUnits).values({ printerId: printer.id, amsIndex: EXT, updatedAt: new Date() }).returning())[0].id;
 		const [existing] = await db.select().from(amsSlots).where(and(eq(amsSlots.amsUnitId, unitId), eq(amsSlots.slotIndex, 0))).limit(1);
-		if (existing?.manualColor) {
+		// Sticky: once the external spool has a color, telemetry only refreshes remaining%.
+		if (existing?.colorHex) {
 			await db.update(amsSlots).set({ remainingPct: numOrNull(vt.remain) ?? existing.remainingPct, updatedAt: new Date() }).where(eq(amsSlots.id, existing.id));
 			return;
 		}
-		// Only overwrite a manually-set external color when the printer actually reports one.
 		const slotVals = {
 			printerId: printer.id,
-			filamentType: empty ? null : vt.tray_type || existing?.filamentType || 'PLA',
-			filamentBrand: vt.tray_sub_brands || existing?.filamentBrand || 'External',
-			colorHex: empty ? null : color ?? existing?.colorHex ?? null,
-			colorName: empty ? null : vt.tray_id_name || existing?.colorName || null,
+			filamentType: empty ? null : vt.tray_type || 'PLA',
+			filamentBrand: vt.tray_sub_brands || 'External',
+			colorHex: empty ? null : color,
+			colorName: empty ? null : vt.tray_id_name || null,
 			trayUuid: vt.tray_uuid || existing?.trayUuid || null,
 			remainingPct: numOrNull(vt.remain),
 			empty,

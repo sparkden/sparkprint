@@ -63,6 +63,7 @@ export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, r
 		const client = new FtpClient(30000);
 		try {
 			await ftpAccess(client, ip, accessCode);
+			await client.remove(remoteName).catch(() => {}); // clear a stale/locked leftover first
 			await client.uploadFrom(Readable.from(data), remoteName);
 			client.close();
 			return; // clean success
@@ -74,7 +75,12 @@ export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, r
 			await new Promise((r) => setTimeout(r, 800 * attempt));
 		}
 	}
-	throw new Error(`FTPS upload failed after 3 tries: ${(lastErr as Error)?.message ?? lastErr}`);
+	const msg = String((lastErr as Error)?.message ?? lastErr);
+	// 550 = the printer refused to write the file — almost always a storage problem.
+	if (/\b550\b/.test(msg)) {
+		throw new Error("upload refused (550) — the printer can't store the file. Insert a working microSD card (P1/A1 need one for LAN prints), make sure it isn't full, and retry.");
+	}
+	throw new Error(`FTPS upload failed after 3 tries: ${msg}`);
 }
 
 /** Publish the `project_file` print command over the printer's local MQTT (port 8883). */
