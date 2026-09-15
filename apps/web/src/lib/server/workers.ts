@@ -8,7 +8,7 @@
  *                  (MQTT project_file), the way Bambu Studio's LAN mode does.
  * Backed by the in-process queue (queue.ts); on restart, recoverJobs() re-enqueues in-flight work.
  */
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { readFile } from 'node:fs/promises';
 import { onSlice, onDispatch, enqueueSlice, enqueueDispatch } from './queue';
 import { dispatch, logEvent } from './jobs';
@@ -86,6 +86,19 @@ async function recoverJobs() {
 	for (const j of queued) if (!j.gcodeKey) enqueueSlice(j.id);
 }
 
+/**
+ * Periodically re-attempt dispatch for jobs that are sliced and waiting on a printer. Without this,
+ * a job that couldn't find a free/online printer at dispatch time would sit in "queued" forever;
+ * now it goes automatically within ~20s of a printer coming online and idle.
+ */
+async function retryPending() {
+	const rows = await db
+		.select({ id: printJobs.id })
+		.from(printJobs)
+		.where(and(inArray(printJobs.status, ['queued', 'ready']), isNotNull(printJobs.gcodeKey)));
+	for (const j of rows) enqueueDispatch(j.id);
+}
+
 export async function startWorkers() {
 	if (g.__sparkWorkers) return;
 	g.__sparkWorkers = true;
@@ -93,6 +106,8 @@ export async function startWorkers() {
 	onSlice(sliceJob);
 	onDispatch(dispatch);
 	recoverJobs().catch((e) => console.error('[queue] recover', (e as Error).message));
+	// Retry sliced-but-unsent jobs every 20s so they print as soon as a printer is free/online.
+	setInterval(() => retryPending().catch(() => {}), 20000);
 
 	// Warm up: prefer OrcaSlicer; only install the bundled Slic3r if Orca isn't present.
 	orcaAvailable().then((o) => {

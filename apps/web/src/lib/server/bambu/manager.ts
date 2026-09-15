@@ -61,11 +61,22 @@ class BambuManager {
 			clientId: `sparkprint_lan_${printerId.slice(-8)}_${Math.floor(Math.random() * 1e6)}`
 		});
 		this.lanConns.set(printerId, { client, printerId, devId: p.devId });
+		// Only touch the DB if this is still the live connection for the printer (guards against a
+		// replaced/old client firing late events).
+		const isActive = () => this.lanConns.get(printerId)?.client === client;
+		const setOnline = (on: boolean) => {
+			if (!isActive()) return;
+			// On disconnect we clear `online` but leave `status` (don't clobber a 'printing' state on a
+			// brief blip); dispatch already skips any printer that isn't online.
+			db.update(printers).set({ online: on, updatedAt: new Date() }).where(eq(printers.id, printerId)).catch(() => {});
+		};
+		let lastErrLog = 0;
 		client.on('connect', () => {
 			client.subscribe(`device/${p.devId}/report`, { qos: 0 });
 			// Ask for a full snapshot (status, AMS, colors).
 			client.publish(`device/${p.devId}/request`, JSON.stringify({ pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }), { qos: 0 });
-			db.update(printers).set({ online: true, updatedAt: new Date() }).where(eq(printers.id, printerId)).catch(() => {});
+			setOnline(true);
+			console.log(`[bambu-lan] ${p.name}: connected`);
 		});
 		client.on('message', async (_topic, payload) => {
 			try {
@@ -75,7 +86,17 @@ class BambuManager {
 				/* ignore malformed */
 			}
 		});
-		client.on('error', (err: unknown) => console.error(`[bambu-lan] ${p.name}:`, (err as Error)?.message));
+		// A dropped/failed link means the printer is no longer reachable — reflect that truthfully.
+		client.on('offline', () => setOnline(false));
+		client.on('close', () => setOnline(false));
+		client.on('error', (err: unknown) => {
+			setOnline(false);
+			const now = Date.now();
+			if (now - lastErrLog > 60000) { // throttle: the reconnect loop can fire every few seconds
+				lastErrLog = now;
+				console.error(`[bambu-lan] ${p.name}: ${(err as Error)?.message} (will keep retrying)`);
+			}
+		});
 	}
 
 	disconnectLanPrinter(printerId: string) {

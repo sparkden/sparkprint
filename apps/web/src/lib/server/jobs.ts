@@ -184,7 +184,18 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 	}
 
 	await db.update(printJobs).set({ status: 'queued', updatedAt: new Date() }).where(eq(printJobs.id, jobId));
-	await logEvent(jobId, 'queue', 'Waiting for a compatible printer');
+	// Explain WHY nothing dispatched so the timeline is actionable instead of just "waiting".
+	const all = await db
+		.select({ online: printers.online, status: printers.status, model: printers.model })
+		.from(printers)
+		.where(and(eq(printers.orgId, job.orgId), eq(printers.enabled, true)));
+	const printable = all.filter((p) => isCloudPrintable(p.model));
+	let reason = 'Waiting for a compatible printer';
+	if (!printable.length) reason = 'No printers are set up yet — add one in Admin → Printers.';
+	else if (!printable.some((p) => p.online)) reason = 'No printer is online — check each printer’s LAN IP + access code, LAN mode, and that the Pi is on the same network.';
+	else if (!printable.some((p) => p.online && p.status === 'idle')) reason = 'Printers are online but busy — the job will start when one is free (finished prints must be checked out first).';
+	else reason = 'No available printer has the requested color loaded — load the color or pick another.';
+	await logEvent(jobId, 'queue', reason);
 	return 'queued';
 }
 
