@@ -6,7 +6,7 @@
 	const firstRun = $derived(data.firstRun);
 </script>
 
-<svelte:head><title>{firstRun ? 'Create your lab' : 'Sign up'} · SparkPrint</title></svelte:head>
+<svelte:head><title>{firstRun ? 'Create your lab' : 'Sign up'} · LataPrint</title></svelte:head>
 
 <div class="card p-8">
 	{#if firstRun}
@@ -14,7 +14,7 @@
 		<p class="mt-1.5 text-sm text-soft-ink">You're the first user, so you'll be the owner. Everyone else joins this lab afterward.</p>
 	{:else}
 		<h1 class="text-2xl font-semibold">Create your account</h1>
-		<p class="mt-1.5 text-sm text-soft-ink">Join {data.orgName ?? 'the lab'} on SparkPrint.</p>
+		<p class="mt-1.5 text-sm text-soft-ink">Join {data.orgName ?? 'the lab'} on LataPrint.</p>
 	{/if}
 
 	{#if form?.error}

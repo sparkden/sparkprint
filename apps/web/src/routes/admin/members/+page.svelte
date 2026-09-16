@@ -23,7 +23,7 @@
 	const canEditOwners = $derived(data.myRole === 'owner');
 </script>
 
-<svelte:head><title>Members · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Members · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="Members" subtitle="{data.members.length} people in your lab.">

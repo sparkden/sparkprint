@@ -34,7 +34,7 @@
 	const fullUrl = $derived(data.url ? `http://<pi-ip>:${data.port}${data.url}` : '');
 </script>
 
-<svelte:head><title>Kiosk · SparkPrint</title></svelte:head>
+<svelte:head><title>Kiosk · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-2xl">
 	<div class="mb-4">
@@ -69,7 +69,7 @@
 	</div>
 
 	<div class="mt-3 space-y-1 text-xs text-muted-ink">
-		<p><b>Requires:</b> the SparkPrint Pi with a monitor plugged in (HDMI). Enabling installs a minimal Wayland kiosk (cage) + Chromium and starts it on boot — it can take a few minutes and may need one reboot the first time.</p>
+		<p><b>Requires:</b> the LataPrint Pi with a monitor plugged in (HDMI). Enabling installs a minimal Wayland kiosk (cage) + Chromium and starts it on boot — it can take a few minutes and may need one reboot the first time.</p>
 		<p><b>Root access:</b> enabling runs a system setup script, which needs passwordless sudo for the <code>sparkprint</code> user (turn it on via the installer's "root terminal" prompt). If it fails with a sudo error, run this on the Pi instead:</p>
 		<p class="rounded bg-warm-100 px-2 py-1 font-mono text-[11px] text-ink">sudo bash /opt/sparkprint/scripts/kiosk.sh enable "http://localhost:{data.port}{data.url ?? '/monitor'}"</p>
 	</div>

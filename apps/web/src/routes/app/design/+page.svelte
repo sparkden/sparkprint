@@ -73,7 +73,7 @@
 		}
 	}
 	const uploadColorRequest = $derived(
-		filamentColors.map((c, i) => ({ filamentType: c?.filamentType ?? detected[i]?.type ?? 'PLA', colorHex: c?.colorHex ?? '#FF5B14', colorName: c?.colorName ?? '' }))
+		filamentColors.map((c, i) => ({ filamentType: c?.filamentType ?? detected[i]?.type ?? 'PLA', colorHex: c?.colorHex ?? '#1E2F66', colorName: c?.colorName ?? '' }))
 	);
 	const uploadReady = $derived(detected.length > 0 && filamentColors.every((c) => !!c));
 	let stats = $state<{ bbox: { x: number; y: number; z: number }; volumeMm3: number; triangles: number; objects: number } | null>(null);
@@ -165,7 +165,7 @@
 	let showRef = $state(false); // scale-reference objects (pencil + paperclip) beside the plate
 </script>
 
-<svelte:head><title>New print · SparkPrint</title></svelte:head>
+<svelte:head><title>New print · LataPrint</title></svelte:head>
 
 <!-- Fullscreen editor workspace (covers the app sidebar) -->
 <div class="fixed inset-0 z-40 bg-soft-paper">
@@ -174,7 +174,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#FF5B14'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#1E2F66'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
@@ -301,7 +301,7 @@
 
 					<div>
 						<div class="mb-1 flex items-center justify-between"><span class="label mb-0">Infill</span><span class="text-xs font-semibold text-ink">{infill}%</span></div>
-						<input type="range" min="0" max="100" step="5" bind:value={infill} onchange={invalidatePreview} class="w-full accent-[#FF5B14]" />
+						<input type="range" min="0" max="100" step="5" bind:value={infill} onchange={invalidatePreview} class="w-full accent-[#1e2f66]" />
 						<div class="mt-1 flex flex-wrap gap-1.5">
 							{#each [{ l: 'Hollow', v: 0 }, { l: 'Light', v: 10 }, { l: 'Standard', v: 15 }, { l: 'Strong', v: 40 }, { l: 'Solid', v: 100 }] as pr}
 								<button type="button" onclick={() => { infill = pr.v; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {infill === pr.v ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">{pr.l}</button>
@@ -309,8 +309,8 @@
 						</div>
 					</div>
 
-					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#FF5B14]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>
-					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={raft} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#FF5B14]" /> Raft <span class="text-xs font-normal text-muted-ink">— helps stick to the plate</span></label>
+					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#1e2f66]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>
+					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={raft} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#1e2f66]" /> Raft <span class="text-xs font-normal text-muted-ink">— helps stick to the plate</span></label>
 					<div><label class="label" for="cp">Copies</label><input class="input max-w-[6rem]" id="cp" name="copies" type="number" min="1" max="20" bind:value={copies} /></div>
 
 					<div class="space-y-3 border-t border-warm-200 pt-3">
@@ -413,7 +413,7 @@
 						</div>
 					{/if}
 					<input type="hidden" name="colorRequest" value={JSON.stringify(uploadColorRequest)} />
-					<input type="hidden" name="colorHex" value={filamentColors[0]?.colorHex ?? '#FF5B14'} />
+					<input type="hidden" name="colorHex" value={filamentColors[0]?.colorHex ?? '#1E2F66'} />
 					<input type="hidden" name="filamentType" value={filamentColors[0]?.filamentType ?? 'PLA'} />
 					<button class="btn btn-primary w-full" disabled={submitting || !uploadReady}>
 						{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> Send sliced file to print{/if}

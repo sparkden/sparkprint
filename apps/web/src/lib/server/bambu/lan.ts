@@ -5,7 +5,7 @@
  * for every model (including combo machines like the H2C) and needs no developer mode — just the
  * printer's LAN access code and local IP.
  *
- * Requires the SparkPrint server to be on the SAME network as the printers (see docs/LAN.md).
+ * Requires the LataPrint server to be on the SAME network as the printers (see docs/LAN.md).
  *
  * Refs: Doridian/OpenBambuAPI (ftp.md, mqtt.md), bambulabs_api. FTPS: ftps://<ip>:990 implicit,
  * user "bblp", pass <access code>. Print command url = "ftp:///<filename>" (file at the FTP root).

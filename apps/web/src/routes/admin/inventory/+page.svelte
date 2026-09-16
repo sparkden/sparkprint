@@ -19,7 +19,7 @@
 	);
 </script>
 
-<svelte:head><title>Filament · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Filament · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="Filament inventory" subtitle="Track spools, colors, and cost across the lab · est. value ${totalValue.toFixed(0)}">

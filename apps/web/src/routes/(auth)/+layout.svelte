@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Logo from '$lib/components/Logo.svelte';
+	import Wordmark from '$lib/components/Wordmark.svelte';
 	let { children } = $props();
 </script>
 
@@ -17,9 +18,12 @@
 
 	<main class="flex flex-1 items-center justify-center px-6 pb-16 pt-2">
 		<div class="w-full max-w-md">
+			<div class="mb-7 flex justify-center">
+				<Wordmark height={58} color="var(--color-spark)" />
+			</div>
 			{@render children()}
 			<p class="mt-6 text-center text-xs text-faint-ink">
-				SparkPrint · runs on your network, prints stay in your building
+				LataPrint · runs on your network, prints stay in your building
 			</p>
 		</div>
 	</main>

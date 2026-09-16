@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
-	import Logo from '$lib/components/Logo.svelte';
+	import Wordmark from '$lib/components/Wordmark.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	let { data } = $props();
 
@@ -38,12 +38,10 @@
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="flex items-center gap-4">
-			<Logo />
-			<div class="hidden h-8 w-px bg-warm-300 sm:block"></div>
-			<div class="hidden sm:block">
-				<p class="text-lg font-semibold text-ink">{data.orgName}</p>
-				<p class="text-xs text-muted-ink">Live lab monitor</p>
-			</div>
+			<img src="/immaculata-seal.png" alt="" class="h-12 w-12 shrink-0 object-contain" />
+			<Wordmark height={40} color="var(--color-spark)" class="hidden sm:block" />
+			<div class="hidden h-8 w-px bg-warm-300 md:block"></div>
+			<p class="hidden text-xs text-muted-ink md:block">Live lab monitor</p>
 		</div>
 		<div class="flex items-center gap-3 text-sm font-semibold">
 			<span class="badge badge-success">{free} free</span>

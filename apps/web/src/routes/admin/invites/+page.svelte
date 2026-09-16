@@ -27,7 +27,7 @@
 	}
 </script>
 
-<svelte:head><title>Invites · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Invites · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-4xl">
 	<PageHeader title="Invites" subtitle="Share a link so people can join your lab.">

@@ -83,7 +83,7 @@
 		</div>
 		<form method="POST" action="?/setSpool" use:enhance class="flex flex-wrap items-end gap-3">
 			<label class="text-sm">Color
-				<input class="input mt-1 h-10 w-16 p-1" type="color" name="colorHex" value={data.externalSpool?.colorHex ?? '#FF5B14'} />
+				<input class="input mt-1 h-10 w-16 p-1" type="color" name="colorHex" value={data.externalSpool?.colorHex ?? '#1E2F66'} />
 			</label>
 			<label class="text-sm">Material
 				<select class="select mt-1" name="filamentType" value={data.externalSpool?.filamentType ?? 'PLA'}>
@@ -176,7 +176,7 @@
 			<input type="hidden" name="empty" value={empty.toString()} />
 
 			<label class="flex items-center gap-2 text-sm font-medium text-soft-ink">
-				<input type="checkbox" bind:checked={empty} class="h-4 w-4 rounded accent-[#FF5B14]" /> Slot is empty
+				<input type="checkbox" bind:checked={empty} class="h-4 w-4 rounded accent-[#1e2f66]" /> Slot is empty
 			</label>
 
 			{#if !empty}
@@ -212,7 +212,7 @@
 					</div>
 					<div class="sm:col-span-2">
 						<label class="label" for="rp">Remaining ({remainingPct === '' ? '—' : remainingPct}%)</label>
-						<input class="w-full accent-[#FF5B14]" id="rp" name="remainingPct" type="range" min="0" max="100" bind:value={remainingPct} />
+						<input class="w-full accent-[#1e2f66]" id="rp" name="remainingPct" type="range" min="0" max="100" bind:value={remainingPct} />
 					</div>
 				</div>
 			{/if}

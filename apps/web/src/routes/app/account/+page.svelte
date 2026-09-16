@@ -4,7 +4,7 @@
 	let { data, form } = $props();
 </script>
 
-<svelte:head><title>Account · SparkPrint</title></svelte:head>
+<svelte:head><title>Account · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-2xl">
 	<PageHeader title="Your account" subtitle="{data.profile.orgName} · {data.profile.role}" />

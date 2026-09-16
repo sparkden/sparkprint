@@ -10,7 +10,7 @@
 	}
 </script>
 
-<svelte:head><title>Queue · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Queue · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-4xl space-y-6">
 	<PageHeader title="Print queue" subtitle={data.queueEnabled ? 'Jobs release to printers as they free up.' : 'Queue is off — jobs print immediately when a printer is free.'} />

@@ -121,7 +121,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				eq(printers.orgId, job.orgId),
 				eq(printers.enabled, true),
 				eq(printers.online, true),
-				// Free = no SparkPrint job occupying it (currentJobId is the checkout gate) and not
+				// Free = no LataPrint job occupying it (currentJobId is the checkout gate) and not
 				// mid-print. We deliberately DON'T require status 'idle': a Bambu printer reports
 				// 'finished' until the next print starts, so keying off telemetry alone would leave a
 				// printer permanently unusable after its first job even once it's been checked out.
@@ -540,7 +540,7 @@ export async function checkoutJob(jobId: string, orgId: string, actorId?: string
 }
 
 /**
- * Force a printer back to "free" — clears any SparkPrint job still on it (checks out an
+ * Force a printer back to "free" — clears any LataPrint job still on it (checks out an
  * awaiting-pickup print) and resets its state, so it can take new jobs. For the "Mark as free"
  * button when a printer is stuck showing 'finished'.
  */

@@ -5,7 +5,7 @@
 	let { data } = $props();
 </script>
 
-<svelte:head><title>Printers · SparkPrint</title></svelte:head>
+<svelte:head><title>Printers · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="Printers" subtitle="What's in the lab and what colors are loaded." />

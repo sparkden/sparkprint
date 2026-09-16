@@ -4,7 +4,7 @@
 	let loading = $state(false);
 </script>
 
-<svelte:head><title>Log in · SparkPrint</title></svelte:head>
+<svelte:head><title>Log in · LataPrint</title></svelte:head>
 
 <div class="card p-8">
 	<h1 class="text-2xl font-semibold">Welcome back</h1>

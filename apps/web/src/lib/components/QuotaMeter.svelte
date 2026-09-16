@@ -7,7 +7,7 @@
 	}: { label: string; used: number; limit: number | null; unit?: string } = $props();
 
 	const pct = $derived(limit == null ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100)));
-	const tone = $derived(pct >= 100 ? '#e04f35' : pct >= 80 ? '#fb8b00' : '#ff5b14');
+	const tone = $derived(pct >= 100 ? '#e04f35' : pct >= 80 ? '#c8a24a' : '#1e2f66');
 </script>
 
 <div>

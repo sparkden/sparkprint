@@ -6,7 +6,7 @@
 	let saving = $state(false);
 </script>
 
-<svelte:head><title>Settings · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Settings · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-2xl">
 	<PageHeader title="Lab settings" subtitle="Policies that apply to your whole lab." />

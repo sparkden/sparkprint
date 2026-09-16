@@ -11,7 +11,7 @@
 	]);
 </script>
 
-<svelte:head><title>Overview · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Overview · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-6xl space-y-6">
 	<div>

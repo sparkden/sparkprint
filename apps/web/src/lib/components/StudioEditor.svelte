@@ -10,7 +10,7 @@
 	type ObjRow = { id: string; name: string; color: LabColor };
 
 	let {
-		colorHex = '#FF5B14',
+		colorHex = '#1E2F66',
 		plate = { x: 256, y: 256, z: 256 },
 		labColors = [],
 		defaultColor = null,

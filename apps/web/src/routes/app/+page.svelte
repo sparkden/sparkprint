@@ -7,7 +7,7 @@
 	const firstName = $derived(data.user.name.split(' ')[0]);
 </script>
 
-<svelte:head><title>Home · SparkPrint</title></svelte:head>
+<svelte:head><title>Home · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
 	<div class="flex flex-wrap items-center justify-between gap-3">

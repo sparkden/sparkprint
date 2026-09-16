@@ -29,7 +29,7 @@
 	const warns = $derived([...report.system, ...report.printers.flatMap((p) => p.checks)].filter((c) => c.status === 'warn').length);
 </script>
 
-<svelte:head><title>Diagnostics · SparkPrint</title></svelte:head>
+<svelte:head><title>Diagnostics · LataPrint</title></svelte:head>
 
 {#snippet checkRow(c: Check)}
 	<div class="flex items-start gap-2.5 py-1.5">

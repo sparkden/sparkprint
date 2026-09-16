@@ -120,10 +120,10 @@ async function printerReport(p: typeof printers.$inferSelect): Promise<PrinterRe
 			: { name: 'Live connection', status: p.ipAddress && p.accessCode ? 'warn' : 'fail', detail: 'Not currently connected.', fix: 'If the port test above passes, check the access code is correct and the printer is in LAN Mode.' }
 	);
 
-	// Status. A printer is free for a new job when it has no SparkPrint job occupying it
+	// Status. A printer is free for a new job when it has no LataPrint job occupying it
 	// (currentJobId) and isn't mid-print — regardless of the raw 'finished' telemetry.
 	const busyPrinting = p.status === 'printing' || p.status === 'paused';
-	const occupied = !!p.currentJobId; // a SparkPrint job printing or awaiting checkout
+	const occupied = !!p.currentJobId; // a LataPrint job printing or awaiting checkout
 	const seenMin = p.lastSeenAt ? Math.round((Date.now() - new Date(p.lastSeenAt).getTime()) / 60000) : null;
 	checks.push({
 		name: 'Availability',

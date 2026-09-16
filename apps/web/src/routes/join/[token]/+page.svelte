@@ -13,7 +13,7 @@
 	};
 </script>
 
-<svelte:head><title>Join · SparkPrint</title></svelte:head>
+<svelte:head><title>Join · LataPrint</title></svelte:head>
 
 <div class="flex min-h-full flex-col bg-soft-paper">
 	<header class="mx-auto w-full max-w-6xl px-6 py-5"><a href="/"><Logo /></a></header>

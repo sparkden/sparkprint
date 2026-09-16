@@ -14,7 +14,7 @@
 	const canReprint = $derived(['completed', 'awaiting_pickup', 'canceled', 'failed'].includes(job.status) && (!!job.modelId || !!job.gcodeKey));
 </script>
 
-<svelte:head><title>{job.name} · SparkPrint</title></svelte:head>
+<svelte:head><title>{job.name} · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-4xl">
 	<a href="/app/jobs" class="mb-4 inline-flex items-center gap-1 text-sm text-muted-ink hover:text-ink">

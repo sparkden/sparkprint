@@ -5,7 +5,7 @@
 	let { data } = $props();
 </script>
 
-<svelte:head><title>My prints · SparkPrint</title></svelte:head>
+<svelte:head><title>My prints · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="My prints" subtitle="{data.jobs.length} total">

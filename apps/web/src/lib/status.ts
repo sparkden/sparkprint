@@ -11,7 +11,7 @@ export const JOB_STATUS_META: Record<
 	slice_failed: { label: 'Slice failed', badge: 'badge-danger', tone: '#b23a25' },
 	ready: { label: 'Ready', badge: 'badge-info', tone: '#2b5896' },
 	sending: { label: 'Sending', badge: 'badge-info', tone: '#2b5896' },
-	printing: { label: 'Printing', badge: 'badge-spark', tone: '#e0470a' },
+	printing: { label: 'Printing', badge: 'badge-spark', tone: '#1e2f66' },
 	paused: { label: 'Paused', badge: 'badge-warning', tone: '#a35f00' },
 	awaiting_pickup: { label: 'Awaiting pickup', badge: 'badge-warning', tone: '#a35f00' },
 	completed: { label: 'Completed', badge: 'badge-success', tone: '#327a27' },

@@ -61,7 +61,7 @@
 	}
 </script>
 
-<svelte:head><title>Update · SparkPrint</title></svelte:head>
+<svelte:head><title>Update · LataPrint</title></svelte:head>
 
 <div class="mx-auto max-w-2xl">
 	<div class="mb-4">

@@ -54,7 +54,7 @@ export const actions: Actions = {
 					role = 'student';
 				} else {
 					const slug = slugify(schoolName ?? 'lab') || 'lab';
-					const org = tx.insert(orgs).values({ name: schoolName ?? 'SparkPrint Lab', slug }).returning().get()!;
+					const org = tx.insert(orgs).values({ name: schoolName ?? 'Immaculata High School', slug }).returning().get()!;
 					orgId = org.id;
 					role = 'owner';
 					isOwner = true;

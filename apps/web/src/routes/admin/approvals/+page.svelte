@@ -6,7 +6,7 @@
 	let { data, form } = $props();
 </script>
 
-<svelte:head><title>Approvals · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Approvals · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-4xl">
 	<PageHeader title="Approvals" subtitle="{data.pending.length} print{data.pending.length === 1 ? '' : 's'} waiting for sign-off." />

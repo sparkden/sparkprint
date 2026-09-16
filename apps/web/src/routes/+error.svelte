@@ -8,7 +8,7 @@
 	);
 </script>
 
-<svelte:head><title>{status} · SparkPrint</title></svelte:head>
+<svelte:head><title>{status} · LataPrint</title></svelte:head>
 
 <div class="flex min-h-full flex-col items-center justify-center bg-soft-paper px-6 py-16 text-center">
 	<a href="/" class="mb-8"><Logo size={30} /></a>

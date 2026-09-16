@@ -79,7 +79,7 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 	if (typeof print.gcode_state === 'string' && STATE_MAP[print.gcode_state]) {
 		let s = STATE_MAP[print.gcode_state];
 		// A Bambu printer reports FINISH until the next print starts. That only means "occupied /
-		// awaiting checkout" when SparkPrint is actually tracking a job here (currentJobId). With no
+		// awaiting checkout" when LataPrint is actually tracking a job here (currentJobId). With no
 		// tracked job, a stale/external FINISH just means the bed is free → treat it as idle so the
 		// printer doesn't get stuck unusable.
 		if (s === 'finished' && !printer.currentJobId) s = 'idle';

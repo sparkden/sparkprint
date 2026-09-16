@@ -11,7 +11,7 @@
 	let addOpen = $state(false);
 </script>
 
-<svelte:head><title>Printers · SparkPrint Admin</title></svelte:head>
+<svelte:head><title>Printers · LataPrint Admin</title></svelte:head>
 
 <div class="mx-auto max-w-5xl">
 	<PageHeader title="Printers" subtitle="{data.printers.length} printer{data.printers.length === 1 ? '' : 's'} · {data.printers.filter((p) => p.online).length} online">

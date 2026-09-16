@@ -5,7 +5,7 @@
 	type Stats = { bbox: V3; volumeMm3: number; triangles: number };
 	let {
 		file = null,
-		colorHex = '#FF5B14',
+		colorHex = '#1E2F66',
 		rotationDeg = { x: 0, y: 0, z: 0 },
 		scaleXYZ = { x: 1, y: 1, z: 1 },
 		mirror = { x: false, y: false, z: false },

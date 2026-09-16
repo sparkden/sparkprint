@@ -95,7 +95,7 @@
 	}
 </script>
 
-<svelte:head><title>Terminal · SparkPrint</title></svelte:head>
+<svelte:head><title>Terminal · LataPrint</title></svelte:head>
 
 <div class="mb-4">
 	<h1 class="text-2xl font-semibold">Server terminal</h1>
@@ -122,7 +122,7 @@
 			<span class="ml-2 font-mono">{prompt}</span>
 			<div class="ml-auto flex items-center gap-3">
 				{#if data.rootAvailable}
-					<label class="flex items-center gap-1.5 {asRoot ? 'text-[#ff8f6b]' : ''}"><input type="checkbox" bind:checked={asRoot} class="accent-[#FF5B14]" /> root (sudo)</label>
+					<label class="flex items-center gap-1.5 {asRoot ? 'text-danger' : ''}"><input type="checkbox" bind:checked={asRoot} class="accent-[#1e2f66]" /> root (sudo)</label>
 				{:else}
 					<span class="text-white/30" title="Passwordless sudo isn't configured for {data.runAs}">root: n/a</span>
 				{/if}
