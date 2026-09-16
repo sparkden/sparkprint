@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
-	import Wordmark from '$lib/components/Wordmark.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { COLOR_LIBRARY } from '$lib/colors';
@@ -92,11 +91,12 @@
 <div class="antiburn min-h-screen bg-soft-paper px-5 py-5 sm:px-8">
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
-		<div class="flex items-center gap-4">
-			<img src="/immaculata-seal.png" alt="" class="h-12 w-12 shrink-0 object-contain" />
-			<Wordmark height={40} color="var(--color-spark)" class="hidden sm:block" />
-			<div class="hidden h-8 w-px bg-warm-300 md:block"></div>
-			<p class="hidden text-xs text-muted-ink md:block">Live lab monitor</p>
+		<div class="flex items-center gap-3.5">
+			<img src="/immaculata-seal.png" alt="Immaculata High School" class="h-12 w-12 shrink-0 object-contain" />
+			<div>
+				<p class="text-2xl font-bold leading-none tracking-tight text-ink" style="font-family: var(--font-display)">Immaculata</p>
+				<p class="mt-1 text-xs text-muted-ink">Live lab monitor</p>
+			</div>
 		</div>
 		<div class="flex items-center gap-3 text-sm font-semibold">
 			<span class="badge badge-success">{free} free</span>
