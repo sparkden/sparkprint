@@ -39,6 +39,6 @@
 	</form>
 
 	<p class="mt-5 text-center text-sm text-soft-ink">
-		New here? <a href="/signup" class="font-semibold text-spark hover:underline">Create a lab</a>
+		New here? <a href="/signup" class="font-semibold text-spark hover:underline">Create an account</a>
 	</p>
 </div>

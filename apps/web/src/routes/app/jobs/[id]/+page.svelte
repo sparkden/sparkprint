@@ -11,6 +11,7 @@
 	const canCancel = $derived(!['completed', 'canceled', 'rejected', 'failed', 'awaiting_pickup'].includes(job.status));
 	const active = $derived(['printing', 'sending'].includes(job.status));
 	const awaitingPickup = $derived(job.status === 'awaiting_pickup');
+	const canReprint = $derived(['completed', 'awaiting_pickup', 'canceled', 'failed'].includes(job.status) && (!!job.modelId || !!job.gcodeKey));
 </script>
 
 <svelte:head><title>{job.name} · SparkPrint</title></svelte:head>
@@ -88,7 +89,12 @@
 				</div>
 			{/if}
 
-			<div class="mt-6 flex gap-2">
+			<div class="mt-6 flex flex-wrap gap-2">
+				{#if canReprint}
+					<form method="POST" action="?/reprint" use:enhance>
+						<button class="btn btn-primary btn-sm"><Icon name="refresh" size={15} /> Reprint</button>
+					</form>
+				{/if}
 				{#if canCancel}
 					<form method="POST" action="?/cancel" use:enhance>
 						<button class="btn btn-secondary btn-sm">Cancel print</button>

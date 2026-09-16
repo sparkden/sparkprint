@@ -1,8 +1,8 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
-import { users, orgs } from '$lib/server/db/schema';
+import { users, orgs, printJobs } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -24,7 +24,27 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.from(users)
 		.where(eq(users.orgId, me.orgId))
 		.orderBy(desc(users.createdAt));
-	return { org, members, meId: me.id, myRole: me.role };
+
+	// Lifetime print stats per user (prints that actually consumed material).
+	const stats = await db
+		.select({
+			userId: printJobs.userId,
+			prints: sql<number>`count(*)`,
+			grams: sql<number>`coalesce(sum(coalesce(${printJobs.actualGrams}, ${printJobs.estimatedGrams}, 0)), 0)`
+		})
+		.from(printJobs)
+		.where(and(eq(printJobs.orgId, me.orgId), inArray(printJobs.status, ['printing', 'paused', 'awaiting_pickup', 'completed'])))
+		.groupBy(printJobs.userId);
+
+	const costPerKg = Number(org?.defaultCostPerKg ?? 25);
+	const byUser = new Map(stats.map((s) => [s.userId, s]));
+	const withStats = members.map((m) => {
+		const s = byUser.get(m.id);
+		const grams = Math.round(Number(s?.grams ?? 0));
+		return { ...m, prints: Number(s?.prints ?? 0), grams, cost: (grams / 1000) * costPerKg };
+	});
+
+	return { org, members: withStats, costPerKg, meId: me.id, myRole: me.role };
 };
 
 async function target(orgId: string, userId: string) {

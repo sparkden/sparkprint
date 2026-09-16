@@ -21,6 +21,7 @@
 	let name = $state('');
 	let selected = $state<LabColor | null>(data.colors.find((c) => c.available) ?? data.colors[0] ?? null);
 	let quality = $state(0.2); // layer height
+	let infill = $state(15); // infill density %
 	let supports = $state(false);
 	let raft = $state(false);
 	let copies = $state(1);
@@ -232,12 +233,12 @@
 						formData.set('colorName', useAny ? 'Any (most available)' : (selected!.colorName ?? ''));
 						formData.set('filamentType', useAny ? 'PLA' : selected!.filamentType);
 						formData.set('layerHeightMm', String(quality));
-						formData.set('infillPct', '15');
+						formData.set('infillPct', String(infill));
 						formData.set('supports', String(supports));
 						formData.set('raft', String(raft));
 						formData.set('copies', String(copies));
 						formData.set('printerModelTarget', 'auto');
-						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: 15, supports, raft, adhesion: raft ? 'raft' : 'none' }));
+						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: infill, supports, raft, adhesion: raft ? 'raft' : 'none' }));
 						const thumb = editor?.captureThumbnail?.();
 						if (thumb) formData.set('thumbnail', thumb);
 
@@ -296,6 +297,16 @@
 							{#each QUALITY as q}<button type="button" onclick={() => { quality = q.h; invalidatePreview(); }} class="btn btn-sm {quality === q.h ? 'btn-primary' : 'btn-secondary'}">{q.label}</button>{/each}
 						</div>
 						<p class="mt-1 text-xs text-muted-ink">Layer height {quality} mm</p>
+					</div>
+
+					<div>
+						<div class="mb-1 flex items-center justify-between"><span class="label mb-0">Infill</span><span class="text-xs font-semibold text-ink">{infill}%</span></div>
+						<input type="range" min="0" max="100" step="5" bind:value={infill} onchange={invalidatePreview} class="w-full accent-[#FF5B14]" />
+						<div class="mt-1 flex flex-wrap gap-1.5">
+							{#each [{ l: 'Hollow', v: 0 }, { l: 'Light', v: 10 }, { l: 'Standard', v: 15 }, { l: 'Strong', v: 40 }, { l: 'Solid', v: 100 }] as pr}
+								<button type="button" onclick={() => { infill = pr.v; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {infill === pr.v ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">{pr.l}</button>
+							{/each}
+						</div>
 					</div>
 
 					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#FF5B14]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>

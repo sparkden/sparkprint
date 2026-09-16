@@ -21,6 +21,16 @@
 		const p = page.url.pathname;
 		return p === href || (href !== '/app' && href !== '/admin' && p.startsWith(href + '/'));
 	}
+	// Group the flat nav into a top group + titled, collapsible sections (e.g. "Manage").
+	const groups = $derived.by(() => {
+		const g: { title: string | null; items: NavItem[] }[] = [{ title: null, items: [] }];
+		for (const item of nav) {
+			if (item.section) g.push({ title: item.section, items: [] });
+			g[g.length - 1].items.push(item);
+		}
+		return g.filter((x) => x.items.length);
+	});
+	let collapsed = $state<Record<string, boolean>>({});
 	const isStaff = $derived(['owner', 'admin', 'teacher'].includes(user.role));
 	const initials = $derived(
 		user.name
@@ -35,36 +45,43 @@
 <div class="flex min-h-full bg-soft-paper">
 	<!-- Sidebar -->
 	<aside
-		class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full border-r border-warm-200 bg-surface shadow-sm transition-transform md:translate-x-0 md:shadow-none {mobileOpen
+		class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r border-warm-200 bg-surface shadow-sm transition-transform md:translate-x-0 md:shadow-none {mobileOpen
 			? 'translate-x-0'
 			: ''}"
 	>
-		<div class="flex h-16 items-center border-b border-warm-200 px-5">
+		<div class="flex h-16 shrink-0 items-center border-b border-warm-200 px-5">
 			<a href={isStaff ? '/admin' : '/app'}><Logo /></a>
 		</div>
-		<nav class="flex flex-col gap-0.5 p-3">
-			{#each nav as item}
-				{#if item.section}
-					<p class="mb-1 mt-4 px-3 text-[0.7rem] font-semibold uppercase tracking-wider text-faint-ink">{item.section}</p>
+		<nav class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-3">
+			{#each groups as group}
+				{#if group.title}
+					<button
+						type="button"
+						onclick={() => (collapsed[group.title!] = !collapsed[group.title!])}
+						class="mb-1 mt-3 flex items-center justify-between rounded-lg px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-wider text-faint-ink hover:bg-warm-100 hover:text-muted-ink"
+					>
+						<span>{group.title}</span>
+						<span class="transition-transform {collapsed[group.title!] ? '' : 'rotate-90'}"><Icon name="chevronRight" size={13} /></span>
+					</button>
 				{/if}
-				<a
-					href={item.href}
-					onclick={() => (mobileOpen = false)}
-					class="group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all {active(
-						item.href
-					)
-						? 'bg-spark-soft text-spark-deep shadow-xs ring-1 ring-spark/15'
-						: 'text-soft-ink hover:bg-warm-100 hover:text-ink'}"
-				>
-					{#if active(item.href)}
-						<span class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-spark"></span>
-					{/if}
-					<Icon name={item.icon} size={18} />
-					<span class="flex-1">{item.label}</span>
-					{#if item.badge}
-						<span class="badge badge-spark">{item.badge}</span>
-					{/if}
-				</a>
+				{#if !group.title || !collapsed[group.title!]}
+					{#each group.items as item}
+						<a
+							href={item.href}
+							onclick={() => (mobileOpen = false)}
+							class="group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all {active(item.href)
+								? 'bg-spark-soft text-spark-deep shadow-xs ring-1 ring-spark/15'
+								: 'text-soft-ink hover:bg-warm-100 hover:text-ink'}"
+						>
+							{#if active(item.href)}
+								<span class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-spark"></span>
+							{/if}
+							<Icon name={item.icon} size={18} />
+							<span class="flex-1">{item.label}</span>
+							{#if item.badge}<span class="badge badge-spark">{item.badge}</span>{/if}
+						</a>
+					{/each}
+				{/if}
 			{/each}
 		</nav>
 	</aside>

@@ -43,6 +43,7 @@
 					<tr>
 						<th class="px-5 py-3 font-semibold">Name</th>
 						<th class="px-5 py-3 font-semibold">Role</th>
+						<th class="px-5 py-3 font-semibold">Prints · filament · cost</th>
 						<th class="px-5 py-3 font-semibold">Quota (g / prints)</th>
 						<th class="px-5 py-3 font-semibold">Last active</th>
 						<th class="px-5 py-3"></th>
@@ -58,6 +59,9 @@
 							<td class="px-5 py-3">
 								<span class="badge {roleBadge[m.role]} capitalize">{m.role}</span>
 								{#if m.status === 'suspended'}<span class="badge badge-danger ml-1">Suspended</span>{/if}
+							</td>
+							<td class="px-5 py-3 text-soft-ink tabular-nums">
+								<span class="font-medium text-ink">{m.prints}</span> prints · {m.grams} g · <span class="font-medium text-ink">${m.cost.toFixed(2)}</span>
 							</td>
 							<td class="px-5 py-3 text-soft-ink">
 								{m.monthlyGramLimit ?? '∞'} g / {m.monthlyJobLimit ?? '∞'}
@@ -78,6 +82,14 @@
 	<Modal bind:open title="Manage {editing.name}">
 		{@const m = editing}
 		<div class="space-y-6">
+			<!-- Lifetime stats -->
+			<div class="grid grid-cols-3 gap-3 rounded-xl border border-warm-200 bg-soft-paper p-3 text-center">
+				<div><div class="text-xs text-muted-ink">Prints</div><div class="text-lg font-bold text-ink">{m.prints}</div></div>
+				<div><div class="text-xs text-muted-ink">Filament</div><div class="text-lg font-bold text-ink">{m.grams} g</div></div>
+				<div><div class="text-xs text-muted-ink">Cost</div><div class="text-lg font-bold text-ink">${m.cost.toFixed(2)}</div></div>
+			</div>
+			<a href="/admin/members/{m.id}" class="text-sm font-semibold text-spark hover:underline">View all their prints →</a>
+
 			<!-- Role -->
 			<form method="POST" action="?/updateRole" use:enhance class="flex items-end gap-3">
 				<input type="hidden" name="userId" value={m.id} />

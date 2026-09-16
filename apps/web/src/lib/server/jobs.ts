@@ -432,6 +432,35 @@ export async function markDone(jobId: string, orgId: string, actorId?: string) {
 	return { ok: true };
 }
 
+/** Re-queue a finished print — clones it, reusing the already-sliced file (no re-slice) and
+ *  preferring the same printer model it ran on. */
+export async function reprintJob(jobId: string, orgId: string, userId: string) {
+	const [orig] = await db.select().from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, orgId))).limit(1);
+	if (!orig) return { ok: false as const, error: 'Print not found' };
+
+	// Prefer the exact printer model it printed on last time.
+	let target = orig.printerModelTarget ?? null;
+	if (!target && orig.printerId) {
+		const [p] = await db.select({ model: printers.model }).from(printers).where(eq(printers.id, orig.printerId)).limit(1);
+		if (p?.model) target = p.model;
+	}
+	const presliced = orig.gcodeKey && objectExists(orig.gcodeKey);
+	return submitJob({
+		orgId,
+		userId,
+		modelId: orig.modelId,
+		name: orig.name,
+		colorRequest: orig.colorRequest as ColorRequest[],
+		layerHeightMm: Number(orig.layerHeightMm ?? 0.2),
+		infillPct: orig.infillPct ?? 15,
+		supports: !!orig.supports,
+		copies: orig.copies ?? 1,
+		printerModelTarget: target,
+		process: (orig.process as Record<string, unknown>) ?? {},
+		...(presliced ? { preslicedKey: orig.gcodeKey!, preslicedGrams: Number(orig.estimatedGrams ?? 0), preslicedTimeSec: orig.estimatedTimeSec ?? 0 } : {})
+	});
+}
+
 export async function cancelJob(jobId: string, orgId: string, actorId?: string) {
 	const [job] = await db
 		.select()

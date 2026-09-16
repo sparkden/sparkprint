@@ -1,8 +1,8 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { printJobs, models, printers, users, jobEvents } from '$lib/server/db/schema';
-import { cancelJob, completeJob, checkoutJob } from '$lib/server/jobs';
+import { cancelJob, completeJob, checkoutJob, reprintJob } from '$lib/server/jobs';
 import { hasRole } from '$lib/server/auth';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -90,5 +90,20 @@ export const actions: Actions = {
 		const r = await checkoutJob(params.id, user.orgId, user.id);
 		if (!r.ok) return fail(400, { error: r.error });
 		return { success: true };
+	},
+
+	// Re-queue this print again (same model/color/settings, same printer model). Owner or staff.
+	reprint: async ({ params, locals }) => {
+		const user = locals.user!;
+		const [job] = await db
+			.select({ userId: printJobs.userId })
+			.from(printJobs)
+			.where(and(eq(printJobs.id, params.id), eq(printJobs.orgId, user.orgId)))
+			.limit(1);
+		if (!job) return fail(404, { error: 'Not found' });
+		if (job.userId !== user.id && !hasRole(user, 'teacher')) return fail(403, { error: 'Not allowed' });
+		const r = await reprintJob(params.id, user.orgId, user.id);
+		if (!r.ok) return fail(400, { error: r.error });
+		throw redirect(303, `/app/jobs/${r.jobId}`);
 	}
 };
