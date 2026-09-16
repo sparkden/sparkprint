@@ -3,6 +3,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { printJobs, models, printers, users, jobEvents } from '$lib/server/db/schema';
 import { cancelJob, completeJob, checkoutJob, reprintJob } from '$lib/server/jobs';
+import { manager } from '$lib/server/bambu/manager';
 import { hasRole } from '$lib/server/auth';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -90,6 +91,28 @@ export const actions: Actions = {
 		const r = await checkoutJob(params.id, user.orgId, user.id);
 		if (!r.ok) return fail(400, { error: r.error });
 		return { success: true };
+	},
+
+	// Change the print speed profile (1 Silent · 2 Standard · 3 Sport · 4 Ludicrous). Owner or staff.
+	// Saves the choice and, if the print is live, applies it to the running job immediately.
+	setSpeed: async ({ params, request, locals }) => {
+		const user = locals.user!;
+		const fd = await request.formData();
+		const level = Number(fd.get('level'));
+		if (![1, 2, 3, 4].includes(level)) return fail(400, { error: 'Invalid speed' });
+		const [job] = await db
+			.select({ userId: printJobs.userId, status: printJobs.status, printerId: printJobs.printerId })
+			.from(printJobs)
+			.where(and(eq(printJobs.id, params.id), eq(printJobs.orgId, user.orgId)))
+			.limit(1);
+		if (!job) return fail(404, { error: 'Not found' });
+		if (job.userId !== user.id && !hasRole(user, 'teacher')) return fail(403, { error: 'Not allowed' });
+		await db.update(printJobs).set({ speedLevel: level, updatedAt: new Date() }).where(eq(printJobs.id, params.id));
+		let applied = false;
+		if (job.printerId && (job.status === 'printing' || job.status === 'paused')) {
+			applied = await manager().setSpeed(job.printerId, level as 1 | 2 | 3 | 4);
+		}
+		return { success: true, speedApplied: applied };
 	},
 
 	// Re-queue this print again (same model/color/settings, same printer model). Owner or staff.

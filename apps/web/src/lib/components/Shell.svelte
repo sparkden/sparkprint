@@ -112,7 +112,7 @@
 					<p class="text-xs capitalize leading-tight text-muted-ink">{user.role}</p>
 				</div>
 				<div
-					class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-tangerine to-spark-deep text-sm font-semibold text-white shadow-spark ring-1 ring-white/40"
+					class="flex h-9 w-9 items-center justify-center rounded-full bg-spark text-sm font-semibold text-white ring-1 ring-spark-deep/30"
 				>
 					{initials}
 				</div>

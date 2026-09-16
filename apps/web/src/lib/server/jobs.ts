@@ -308,6 +308,7 @@ export type SubmitInput = {
 	colorRequest: ColorRequest[];
 	layerHeightMm: number;
 	infillPct: number;
+	speedLevel?: number;
 	supports: boolean;
 	copies: number;
 	printerModelTarget: string | null;
@@ -335,6 +336,7 @@ export async function submitJob(input: SubmitInput) {
 			colorRequest: input.colorRequest,
 			layerHeightMm: input.layerHeightMm.toFixed(2),
 			infillPct: input.infillPct,
+			speedLevel: input.speedLevel ?? 2,
 			supports: input.supports,
 			copies: input.copies,
 			printerModelTarget: input.printerModelTarget,
@@ -453,6 +455,7 @@ export async function reprintJob(jobId: string, orgId: string, userId: string) {
 		colorRequest: orig.colorRequest as ColorRequest[],
 		layerHeightMm: Number(orig.layerHeightMm ?? 0.2),
 		infillPct: orig.infillPct ?? 15,
+		speedLevel: orig.speedLevel ?? 2,
 		supports: !!orig.supports,
 		copies: orig.copies ?? 1,
 		printerModelTarget: target,

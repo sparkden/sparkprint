@@ -18,6 +18,7 @@
 {#if open}
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
 		<button
+			type="button"
 			aria-label="Close"
 			class="absolute inset-0 bg-ink/40 backdrop-blur-sm"
 			onclick={() => (open = false)}
@@ -25,7 +26,7 @@
 		<div class="card relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto p-6 shadow-xl">
 			<div class="mb-4 flex items-center justify-between">
 				<h2 class="text-lg font-semibold">{title}</h2>
-				<button class="btn btn-ghost btn-sm" onclick={() => (open = false)} aria-label="Close">
+				<button type="button" class="btn btn-ghost btn-sm" onclick={() => (open = false)} aria-label="Close">
 					<Icon name="x" size={18} />
 				</button>
 			</div>

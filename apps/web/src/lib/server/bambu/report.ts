@@ -7,8 +7,20 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { printers, amsUnits, amsSlots, printJobs } from '../db/schema';
 import { completeJob, promoteQueue } from '../jobs';
+import { manager } from './manager';
 import { captureFrame } from './camera';
 import { putBuffer } from '../storage';
+
+// Throttle live speed nudges: at most one per (job, level) every 20s, so a printer that ignores
+// print_speed isn't sent the command on every telemetry frame.
+const lastSpeedNudge = new Map<string, { level: number; at: number }>();
+function shouldNudgeSpeed(jobId: string, level: number): boolean {
+	const prev = lastSpeedNudge.get(jobId);
+	const now = Date.now();
+	if (prev && prev.level === level && now - prev.at < 20000) return false;
+	lastSpeedNudge.set(jobId, { level, at: now });
+	return true;
+}
 
 // Capture the end-of-print camera still once per job (deduped in-process).
 const capturing = new Set<string>();
@@ -195,6 +207,16 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 				.update(printJobs)
 				.set({ status: 'printing', updatedAt: new Date() })
 				.where(and(eq(printJobs.id, jobId), inArray(printJobs.status, ['sending', 'ready', 'queued', 'printing'])));
+			// Apply the job's chosen speed profile. Bambu resets to Standard at print start, so we
+			// nudge it toward the requested level whenever telemetry shows a mismatch (self-healing
+			// and idempotent — once spd_lvl matches, we stop). Throttled so a printer that ignores
+			// print_speed isn't hammered on every telemetry tick.
+			if (gs === 'RUNNING' && typeof print.spd_lvl === 'number') {
+				const [j] = await db.select({ speed: printJobs.speedLevel }).from(printJobs).where(eq(printJobs.id, jobId)).limit(1);
+				if (j?.speed && j.speed !== print.spd_lvl && shouldNudgeSpeed(jobId, j.speed)) {
+					manager().setSpeed(printer.id, j.speed as 1 | 2 | 3 | 4);
+				}
+			}
 		} else if (gs === 'PAUSE') {
 			await db
 				.update(printJobs)

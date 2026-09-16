@@ -164,6 +164,13 @@ class BambuManager {
 			1
 		);
 	}
+	/**
+	 * Set the print-speed profile (Bambu spd_lvl): 1 Silent · 2 Standard · 3 Sport · 4 Ludicrous.
+	 * Works before or during a print; the printer applies it live to the running job.
+	 */
+	setSpeed(printerId: string, level: 1 | 2 | 3 | 4) {
+		return this.command(printerId, { print: { command: 'print_speed', param: String(level), sequence_id: this.nextSeq() } }, 1);
+	}
 	/** Guide an in-progress AMS change: 'resume' | 'done' | 'reset' | 'pause'. */
 	amsControl(printerId: string, action: 'resume' | 'done' | 'reset' | 'pause') {
 		return this.command(printerId, { print: { command: 'ams_control', sequence_id: this.nextSeq(), param: action } }, 1);

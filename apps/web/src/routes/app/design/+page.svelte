@@ -4,6 +4,7 @@
 	import { unzipSync, strFromU8 } from 'fflate';
 	import StudioEditor from '$lib/components/StudioEditor.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { colorDistance } from '$lib/color';
 	let { data, form } = $props();
 
@@ -25,6 +26,13 @@
 	let supports = $state(false);
 	let raft = $state(false);
 	let copies = $state(1);
+	let speed = $state(2); // Bambu speed profile: 1 Silent · 2 Standard · 3 Sport · 4 Ludicrous
+	const SPEED = [
+		{ v: 1, label: 'Silent' },
+		{ v: 2, label: 'Standard' },
+		{ v: 3, label: 'Sport' },
+		{ v: 4, label: 'Ludicrous' }
+	];
 	let mode = $state<'design' | 'upload'>('design'); // 'upload' = print a Bambu Studio .gcode.3mf
 
 	// Multicolor: filaments detected in an uploaded sliced 3mf, each mapped to a lab color.
@@ -86,8 +94,9 @@
 	let slicing = $state(false);
 	let sliceError = $state<string | null>(null);
 	let sliceNote = $state<string | null>(null);
+	let sliceModalOpen = $state(false); // "Print sliced" result modal shown after a slice completes
 	/** Any design/geometry change makes the last slice stale. */
-	function invalidatePreview() { preview = null; sliceError = null; sliceNote = null; }
+	function invalidatePreview() { preview = null; sliceError = null; sliceNote = null; sliceModalOpen = false; }
 
 	function fmtTime(sec: number): string {
 		if (!sec || sec < 0) return '—';
@@ -237,6 +246,7 @@
 						formData.set('supports', String(supports));
 						formData.set('raft', String(raft));
 						formData.set('copies', String(copies));
+						formData.set('speedLevel', String(speed));
 						formData.set('printerModelTarget', 'auto');
 						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: infill, supports, raft, adhesion: raft ? 'raft' : 'none' }));
 						const thumb = editor?.captureThumbnail?.();
@@ -250,6 +260,7 @@
 									const p = (result.data?.preview ?? null) as Preview | null;
 									preview = p;
 									sliceNote = p ? null : 'No slicer is set up here, so there’s no detailed preview — you can still send it to print.';
+									sliceModalOpen = true; // show the "Print sliced" result modal
 								} else if (result.type === 'failure') {
 									sliceError = (result.data?.sliceError as string) ?? (result.data?.error as string) ?? 'Slicing failed.';
 								} else {
@@ -265,7 +276,7 @@
 							formData.set('preslicedGrams', String(preview.grams));
 							formData.set('preslicedTimeSec', String(preview.timeSec));
 						}
-						return async ({ update }) => { await update(); submitting = false; };
+						return async ({ update }) => { await update(); submitting = false; sliceModalOpen = false; };
 					}}
 					class="space-y-4">
 					<div><label class="label" for="pn">Print name</label><input class="input" id="pn" name="name" bind:value={name} placeholder="My cool model" required /></div>
@@ -309,6 +320,14 @@
 						</div>
 					</div>
 
+					<div>
+						<span class="label">Print speed</span>
+						<div class="grid grid-cols-4 gap-1.5">
+							{#each SPEED as s}<button type="button" onclick={() => (speed = s.v)} class="btn btn-sm {speed === s.v ? 'btn-primary' : 'btn-secondary'}">{s.label}</button>{/each}
+						</div>
+						<p class="mt-1 text-xs text-muted-ink">Faster prints can lower quality. You can change this mid-print too.</p>
+					</div>
+
 					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#1e2f66]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>
 					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={raft} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#1e2f66]" /> Raft <span class="text-xs font-normal text-muted-ink">— helps stick to the plate</span></label>
 					<div><label class="label" for="cp">Copies</label><input class="input max-w-[6rem]" id="cp" name="copies" type="number" min="1" max="20" bind:value={copies} /></div>
@@ -316,35 +335,14 @@
 					<div class="space-y-3 border-t border-warm-200 pt-3">
 						{#if sliceError}<div class="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{sliceError}</div>{/if}
 
-						<!-- Sliced preview — the rendered plate + time / filament / layers, shown before printing -->
-						{#if preview}
-							<div class="overflow-hidden rounded-xl border border-warm-200">
-								{#if preview.thumbnail}
-									<img src={preview.thumbnail} alt="Sliced plate preview" class="block w-full bg-[#2b2b2b] object-contain" />
-								{:else}
-									<div class="flex h-28 items-center justify-center bg-warm-50 text-xs text-muted-ink">Sliced ✓</div>
-								{/if}
-								<div class="grid grid-cols-3 divide-x divide-warm-200 border-t border-warm-200 text-center">
-									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Time</div><div class="text-sm font-semibold text-ink">{fmtTime(preview.timeSec)}</div></div>
-									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Filament</div><div class="text-sm font-semibold text-ink">{fmtGrams(preview.grams)}</div></div>
-									<div class="px-1 py-2"><div class="text-xs text-muted-ink">Layers</div><div class="text-sm font-semibold text-ink">{preview.layers || '—'}</div></div>
-								</div>
-							</div>
-						{:else if sliceNote}
-							<div class="rounded-lg bg-warm-50 px-3 py-2 text-xs text-muted-ink">{sliceNote}</div>
-						{/if}
-
 						{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A teacher approves before it prints.</div>{/if}
 						<div class="flex items-center justify-between text-sm"><span class="text-muted-ink">Quota left</span><span class="font-semibold text-ink">{data.usage.gramsRemaining ?? '∞'} g · {data.usage.jobsRemaining ?? '∞'} prints</span></div>
 
 						{#if preview || sliceNote}
-							<button type="submit" formaction="?/submit" class="btn btn-primary w-full" disabled={!canSubmit || submitting}>
-								{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> {data.approvalMode ? 'Submit for approval' : 'Send to print'}{/if}
-							</button>
+							<button type="button" onclick={() => (sliceModalOpen = true)} class="btn btn-primary w-full"><Icon name="eye" size={16} /> Review &amp; print</button>
 							<button type="submit" formaction="?/slice" class="btn btn-secondary btn-sm w-full" disabled={slicing}>
 								{#if slicing}Re-slicing…{:else}Re-slice{/if}
 							</button>
-							{#if !canSubmit}<p class="text-center text-xs text-muted-ink">Add a print name to send it.</p>{/if}
 						{:else}
 							<button type="submit" formaction="?/slice" class="btn btn-primary w-full" disabled={!canSlice || slicing}>
 								{#if slicing}Slicing…{:else}<Icon name="layers" size={16} /> Slice &amp; preview{/if}
@@ -352,6 +350,52 @@
 							{#if !canSlice}<p class="text-center text-xs text-muted-ink">Add a model and color to slice.</p>{/if}
 						{/if}
 					</div>
+
+					<!-- "Print sliced" result modal: stats + Print now / Back. Kept inside the form so
+					     the Print-now button submits the ?/submit action directly. -->
+					{#if sliceModalOpen}
+						<Modal bind:open={sliceModalOpen} title="Print sliced">
+							<div class="space-y-4">
+								<div class="flex items-center gap-3">
+									<div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-success/15 text-success"><Icon name="check" size={24} /></div>
+									<div class="min-w-0">
+										<p class="text-base font-semibold text-ink">Your model is sliced and ready</p>
+										<p class="truncate text-sm text-muted-ink">{name || 'Untitled print'}{selected ? ` · ${selected.colorName ?? selected.colorHex}` : anyColor ? ' · No color preference' : ''}</p>
+									</div>
+								</div>
+
+								{#if preview}
+									{#if preview.thumbnail}
+										<img src={preview.thumbnail} alt="Sliced plate preview" class="block max-h-72 w-full rounded-xl border border-warm-200 bg-[#2b2b2b] object-contain" />
+									{/if}
+									<div class="grid grid-cols-3 divide-x divide-warm-200 rounded-xl border border-warm-200 text-center">
+										<div class="px-2 py-3"><div class="text-xs text-muted-ink">Time</div><div class="text-base font-semibold text-ink">{fmtTime(preview.timeSec)}</div></div>
+										<div class="px-2 py-3"><div class="text-xs text-muted-ink">Filament</div><div class="text-base font-semibold text-ink">{fmtGrams(preview.grams)}</div></div>
+										<div class="px-2 py-3"><div class="text-xs text-muted-ink">Layers</div><div class="text-base font-semibold text-ink">{preview.layers || '—'}</div></div>
+									</div>
+								{:else if sliceNote}
+									<div class="rounded-lg bg-warm-50 px-3 py-2 text-sm text-muted-ink">{sliceNote}</div>
+								{/if}
+
+								<div class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+									<span class="text-muted-ink">Quality <span class="font-medium text-ink">{quality} mm · {infill}% infill</span></span>
+									<span class="text-muted-ink">Speed <span class="font-medium text-ink">{SPEED.find((s) => s.v === speed)?.label}</span></span>
+									{#if copies > 1}<span class="text-muted-ink">Copies <span class="font-medium text-ink">{copies}</span></span>{/if}
+								</div>
+
+								{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A teacher approves before it prints.</div>{/if}
+
+								<p class="pt-1 text-center text-base font-semibold text-ink">Print now?</p>
+								<div class="flex gap-2">
+									<button type="button" class="btn btn-secondary flex-1" onclick={() => (sliceModalOpen = false)}>Back</button>
+									<button type="submit" formaction="?/submit" class="btn btn-primary flex-1" disabled={!canSubmit || submitting}>
+										{#if submitting}Sending…{:else}<Icon name="bolt" size={16} /> {data.approvalMode ? 'Submit for approval' : 'Print now'}{/if}
+									</button>
+								</div>
+								{#if !canSubmit}<p class="text-center text-xs text-muted-ink">Add a print name to send it.</p>{/if}
+							</div>
+						</Modal>
+					{/if}
 				</form>
 			{:else}
 				<!-- Upload a file already sliced in Bambu Studio / OrcaSlicer -->

@@ -39,7 +39,8 @@ if (!g.__sparkMigrated) {
 	// hand-edit the drizzle journal. Re-runs throw "duplicate column name", which we ignore.
 	for (const stmt of [
 		'ALTER TABLE ams_slots ADD COLUMN manual_color integer DEFAULT 0 NOT NULL',
-		'ALTER TABLE print_jobs ADD COLUMN finish_photo_key text'
+		'ALTER TABLE print_jobs ADD COLUMN finish_photo_key text',
+		'ALTER TABLE print_jobs ADD COLUMN speed_level integer DEFAULT 2 NOT NULL'
 	]) {
 		try { sqlite.exec(stmt); } catch { /* column already exists */ }
 	}

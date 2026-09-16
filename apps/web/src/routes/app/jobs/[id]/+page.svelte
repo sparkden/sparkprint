@@ -12,6 +12,15 @@
 	const active = $derived(['printing', 'sending'].includes(job.status));
 	const awaitingPickup = $derived(job.status === 'awaiting_pickup');
 	const canReprint = $derived(['completed', 'awaiting_pickup', 'canceled', 'failed'].includes(job.status) && (!!job.modelId || !!job.gcodeKey));
+
+	const SPEED = [
+		{ v: 1, label: 'Silent' },
+		{ v: 2, label: 'Standard' },
+		{ v: 3, label: 'Sport' },
+		{ v: 4, label: 'Ludicrous' }
+	];
+	const speedLabel = $derived(SPEED.find((s) => s.v === (job.speedLevel ?? 2))?.label ?? 'Standard');
+	const canEditSpeed = $derived(['printing', 'paused'].includes(job.status) && (data.isOwner || data.isStaff));
 </script>
 
 <svelte:head><title>{job.name} · LataPrint</title></svelte:head>
@@ -62,6 +71,7 @@
 				<div><dt class="text-muted-ink">Filament</dt><dd class="mt-0.5 font-medium text-ink">{fmtGrams(job.estimatedGrams)}{job.copies > 1 ? ` · ${job.copies} copies` : ''}</dd></div>
 				<div><dt class="text-muted-ink">Est. time</dt><dd class="mt-0.5 font-medium text-ink">{fmtDuration(job.estimatedTimeSec)}</dd></div>
 				<div><dt class="text-muted-ink">Quality</dt><dd class="mt-0.5 font-medium text-ink">{job.layerHeightMm} mm · {job.infillPct}% infill</dd></div>
+				<div><dt class="text-muted-ink">Speed</dt><dd class="mt-0.5 font-medium text-ink">{speedLabel}</dd></div>
 				<div><dt class="text-muted-ink">Est. cost</dt><dd class="mt-0.5 font-medium text-ink">{job.estimatedCost ? `$${job.estimatedCost}` : '—'}</dd></div>
 				{#if data.printerName}<div class="col-span-2"><dt class="text-muted-ink">Printer</dt><dd class="mt-0.5 font-medium text-ink">{data.printerName}</dd></div>{/if}
 			</dl>
@@ -70,6 +80,25 @@
 				<div class="mt-5 rounded-xl border border-spark/20 bg-spark-soft/40 p-4">
 					<p class="text-sm font-semibold text-spark-deep">Printing now on {data.printerName}</p>
 					<div class="mt-3"><PrinterCamera printerId={job.printerId} label="Watch your print" /></div>
+				</div>
+			{/if}
+
+			{#if canEditSpeed}
+				<div class="mt-5 rounded-xl border border-warm-200 bg-surface p-4">
+					<div class="flex items-center justify-between">
+						<p class="text-sm font-semibold text-ink">Print speed</p>
+						<span class="text-xs text-muted-ink">applies to the printer live</span>
+					</div>
+					<form method="POST" action="?/setSpeed" use:enhance class="mt-3 grid grid-cols-4 gap-1.5">
+						{#each SPEED as s}
+							<button
+								name="level"
+								value={s.v}
+								class="btn btn-sm {(job.speedLevel ?? 2) === s.v ? 'btn-primary' : 'btn-secondary'}"
+							>{s.label}</button>
+						{/each}
+					</form>
+					<p class="mt-2 text-xs text-muted-ink">Silent is quietest; Ludicrous is fastest but can reduce quality.</p>
 				</div>
 			{/if}
 

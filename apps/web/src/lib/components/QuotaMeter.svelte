@@ -22,7 +22,7 @@
 		{#if limit != null}
 			<div class="h-full rounded-full transition-all" style="width: {pct}%; background: {tone}"></div>
 		{:else}
-			<div class="h-full w-full rounded-full bg-gradient-to-r from-spark-soft to-spark/40"></div>
+			<div class="h-full w-full rounded-full bg-spark-soft"></div>
 		{/if}
 	</div>
 </div>

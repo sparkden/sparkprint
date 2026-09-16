@@ -251,6 +251,7 @@ export const printJobs = sqliteTable(
 		printerModelTarget: text('printer_model_target'),
 		layerHeightMm: num('layer_height_mm').default('0.20'),
 		infillPct: integer('infill_pct').default(15),
+		speedLevel: integer('speed_level').notNull().default(2), // Bambu spd_lvl: 1 Silent · 2 Standard · 3 Sport · 4 Ludicrous
 		supports: bool('supports').notNull().default(false),
 		copies: integer('copies').notNull().default(1),
 		process: text('process', { mode: 'json' }).$type<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
