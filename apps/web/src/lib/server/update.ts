@@ -36,6 +36,11 @@ export function runUpdate(): ReadableStream<Uint8Array> {
 	// Fetch newest tip (works on the shallow clone), hard-reset to it, then rebuild the web app.
 	// Note: `npm install` (not `ci`) — it reconciles in place instead of wiping node_modules, so a
 	// hiccup can't leave the app unbootable. Only run it when the lockfile actually changed.
+	//
+	// The service runs with NODE_ENV=production, under which `npm install` omits (and prunes!)
+	// devDependencies — but the build tooling (vite, @sveltejs/kit, tailwind) lives there. So we force
+	// `--include=dev` and run the install/build with NODE_ENV unset, or the build dies with
+	// "vite: not found". The running server still only needs the prod deps at runtime.
 	const script = [
 		`cd ${JSON.stringify(APP_DIR)}`,
 		`echo "→ Fetching latest (${BRANCH})…"`,
@@ -43,9 +48,9 @@ export function runUpdate(): ReadableStream<Uint8Array> {
 		`git fetch --depth 1 origin ${BRANCH}`,
 		`git reset --hard FETCH_HEAD`,
 		`echo "→ Now at: $(git log --oneline -1)"`,
-		`if ! git diff --quiet "$before" HEAD -- package-lock.json package.json apps/web/package.json 2>/dev/null; then echo "→ Dependencies changed — installing…"; npm install --no-audit --no-fund; else echo "→ Dependencies unchanged."; fi`,
+		`if ! git diff --quiet "$before" HEAD -- package-lock.json package.json apps/web/package.json 2>/dev/null; then echo "→ Dependencies changed — installing…"; NODE_ENV=development npm install --include=dev --no-audit --no-fund; else echo "→ Dependencies unchanged."; fi`,
 		`echo "→ Building…"`,
-		`npm run build -w @sparkprint/web`,
+		`NODE_ENV=production npm run build -w @sparkprint/web`,
 		`echo "→ Build complete."`
 	].join(' && ');
 

@@ -151,11 +151,31 @@ async function pickFilament(profiles: string, type = 'PLA'): Promise<string> {
 		const hit = has(re);
 		if (hit) return norm(hit);
 	}
-	// Fall back to the base material (drop sub-variants like "-CF"/"Matte"), then to PLA Basic.
-	const baseMat = esc(mat.split(/[\s-]/)[0]);
-	const baseHit = has(new RegExp(`^(Bambu|Generic) ${baseMat}( Basic)? @BBL X1C\\.json$`, 'i'));
-	if (baseHit) return norm(baseHit);
-	return norm(has(/^Bambu PLA Basic @BBL X1C\.json$/) ?? mains[0] ?? 'Bambu PLA Basic @BBL X1C');
+
+	// Broad same-material fallback — CRITICAL for correct temperatures. e.g. a "PETG" request must
+	// slice with a PETG profile (≈240°C/80°C bed), never PLA (≈220°C/55°C), or the print comes out
+	// cold and delaminates. Match any profile whose name carries the base material as a whole word
+	// (covers "Bambu PETG HF", "Bambu PETG Translucent", "Bambu TPU 95A", …), preferring the plainest
+	// Generic/Basic variant and avoiding composite (-CF/-GF) profiles unless that's what was asked.
+	const baseMat = mat.split(/[\s-]/)[0].toUpperCase(); // PLA | PETG | ABS | ASA | TPU | PC | PA | PVA
+	const wantsComposite = /-?(CF|GF)\b/i.test(type);
+	const matRe = new RegExp(`\\b${esc(baseMat)}\\b`, 'i');
+	const sameMaterial = mains.filter((f) => matRe.test(f));
+	if (sameMaterial.length) {
+		const rank = (f: string) => {
+			let s = f.length * 0.001; // tie-break toward the plainest (shortest) name
+			if (!wantsComposite && /\b(CF|GF)\b|-(CF|GF)/i.test(f)) s += 100; // avoid composites unless asked
+			if (/^Generic /i.test(f)) s -= 5;
+			if (/\bBasic\b/i.test(f)) s -= 4;
+			if (/^Bambu /i.test(f)) s -= 1;
+			return s;
+		};
+		sameMaterial.sort((a, b) => rank(a) - rank(b));
+		return norm(sameMaterial[0]);
+	}
+
+	// Nothing of that material at all → PLA Basic as the last resort.
+	return norm(has(/^Bambu PLA Basic @BBL X1C\.json$/) ?? has(/^Generic PLA @BBL X1C\.json$/) ?? mains[0] ?? 'Bambu PLA Basic @BBL X1C');
 }
 
 function run(cmd: string, args: string[], timeoutMs = 300000): Promise<{ code: number; out: string }> {

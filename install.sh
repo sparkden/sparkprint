@@ -321,8 +321,10 @@ fi
 # ── 7. Build + migrate ────────────────────────────────────────────────────────
 step "7/9  Build & database migration (a few minutes)…"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-sudo -u "$APP_USER" bash -lc "cd '$APP_DIR' && npm ci --no-audit --no-fund" || die "npm install failed."
-sudo -u "$APP_USER" bash -lc "cd '$APP_DIR' && npm run build -w @sparkprint/web" || die "Build failed."
+# Include devDependencies (vite/@sveltejs/kit/tailwind) even if NODE_ENV=production is in the env —
+# the build needs them. The runtime service only uses the prod deps.
+sudo -u "$APP_USER" bash -lc "cd '$APP_DIR' && NODE_ENV=development npm ci --include=dev --no-audit --no-fund" || die "npm install failed."
+sudo -u "$APP_USER" bash -lc "cd '$APP_DIR' && NODE_ENV=production npm run build -w @sparkprint/web" || die "Build failed."
 sudo -u "$APP_USER" bash -lc "cd '$APP_DIR/apps/web' && set -a && . .env && set +a && node scripts/migrate.js" && ok "Database migrated." || warn "Migration step reported an issue — check the DB URL."
 chmod +x "$APP_DIR/scripts/run-prod.sh"
 
