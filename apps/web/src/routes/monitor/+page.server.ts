@@ -20,15 +20,24 @@ async function kioskOrg(token: string | null): Promise<{ orgId: string; orgName:
 	return o ? { orgId, orgName: o.name } : null;
 }
 
-// Who is acting: a signed-in member or the kiosk token. Returns the org + actor (null for kiosk).
+const STAFF_ROLES = ['owner', 'admin', 'teacher'];
+
+// Who may CONTROL the board: staff (teacher/admin/owner) or the trusted no-login kiosk on the lab
+// machine. A signed-in STUDENT is intentionally not a controller — they must not be able to stop,
+// check out, or otherwise touch other people's prints from the shared monitor. Returns null when the
+// caller isn't allowed, which the actions turn into a 403.
 async function actor(locals: App.Locals, url: URL, fd?: FormData): Promise<{ orgId: string; actorId?: string } | null> {
-	if (locals.user) return { orgId: locals.user.orgId, actorId: locals.user.id };
+	if (locals.user) {
+		if (!STAFF_ROLES.includes(locals.user.role)) return null;
+		return { orgId: locals.user.orgId, actorId: locals.user.id };
+	}
 	const k = await kioskOrg(url.searchParams.get('kiosk') || String(fd?.get('kiosk') || ''));
 	return k ? { orgId: k.orgId } : null;
 }
 
-// Fullscreen lab monitor for the shared lab computer. Any signed-in member can view + check out
-// finished prints. Also runs as a no-login kiosk via ?kiosk=<token> (the Pi display).
+// Fullscreen lab monitor for the shared lab computer. Staff (teacher/admin/owner) can view + manage
+// prints; students are redirected to their own dashboard. Also runs as a no-login kiosk via
+// ?kiosk=<token> (the trusted Pi display), which has full control of the board.
 export const load: PageServerLoad = async ({ locals, url }) => {
 	let user = locals.user as { orgId: string; orgName: string; role: string } | null;
 	let kiosk = false;
@@ -37,6 +46,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		if (k) { user = { orgId: k.orgId, orgName: k.orgName, role: 'student' }; kiosk = true; }
 	}
 	if (!user) throw redirect(303, '/login?next=/monitor');
+	// The lab monitor is for staff and the physical kiosk only. Students have their own dashboard and
+	// must not be able to control the shared board — send them there.
+	if (!kiosk && !STAFF_ROLES.includes(user.role)) throw redirect(303, '/app');
 
 	// QR to the public app so students can open it on their phones straight from the lab board.
 	const [orgRow] = await db.select({ settings: orgs.settings }).from(orgs).where(eq(orgs.id, user.orgId)).limit(1);
@@ -132,7 +144,7 @@ export const actions: Actions = {
 	checkout: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const r = await checkoutJob(String(fd.get('jobId')), a.orgId, a.actorId);
 		return r.ok ? { success: true } : fail(400, { error: r.error });
 	},
@@ -140,7 +152,7 @@ export const actions: Actions = {
 	complete: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const r = await markDone(String(fd.get('jobId')), a.orgId, a.actorId);
 		return r.ok ? { success: true } : fail(400, { error: r.error });
 	},
@@ -148,7 +160,7 @@ export const actions: Actions = {
 	stop: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const jobId = String(fd.get('jobId'));
 		const [job] = await db.select({ printerId: printJobs.printerId }).from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, a.orgId))).limit(1);
 		if (job?.printerId) { try { await manager().stop(job.printerId); } catch { /* offline */ } }
@@ -160,7 +172,7 @@ export const actions: Actions = {
 	saveSlot: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const parsed = slotSchema.safeParse({
 			slotId: fd.get('slotId'),
 			empty: fd.get('empty') === 'on' || fd.get('empty') === 'true',
@@ -199,7 +211,7 @@ export const actions: Actions = {
 	setSpool: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const printerId = String(fd.get('printerId'));
 		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
 		if (!printer) return fail(404, { error: 'Printer not found' });
@@ -229,7 +241,7 @@ export const actions: Actions = {
 	setSpeed: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const level = Number(fd.get('level'));
 		if (![1, 2, 3, 4].includes(level)) return fail(400, { error: 'Invalid speed' });
 		const jobId = String(fd.get('jobId'));
@@ -250,7 +262,7 @@ export const actions: Actions = {
 	recheck: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const printerId = String(fd.get('printerId'));
 		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
 		if (!printer) return fail(404, { error: 'Printer not found' });
@@ -262,7 +274,7 @@ export const actions: Actions = {
 	unloadFilament: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
-		if (!a) return fail(401, { error: 'Sign in' });
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
 		const printerId = String(fd.get('printerId'));
 		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
 		if (!printer) return fail(404, { error: 'Printer not found' });
