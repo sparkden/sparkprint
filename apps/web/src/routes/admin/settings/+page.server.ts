@@ -23,7 +23,12 @@ const schema = z.object({
 	approvalMode: z.coerce.boolean(),
 	defaultMonthlyGramLimit: optInt,
 	defaultMonthlyJobLimit: optInt,
-	defaultCostPerKg: z.coerce.number().min(0).max(9999)
+	defaultCostPerKg: z.coerce.number().min(0).max(9999),
+	// Public URL students scan on the kiosk QR to reach the app on their phones.
+	appUrl: z.preprocess(
+		(v) => (v ? String(v).trim() : ''),
+		z.string().url('Enter a full URL like https://print.ethans.app').or(z.literal(''))
+	)
 });
 
 export const actions: Actions = {
@@ -39,6 +44,8 @@ export const actions: Actions = {
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
 
 		const d = parsed.data;
+		const [org] = await db.select({ settings: orgs.settings }).from(orgs).where(eq(orgs.id, locals.user!.orgId)).limit(1);
+		const settings = { ...(org?.settings ?? {}), appUrl: d.appUrl || undefined };
 		await db
 			.update(orgs)
 			.set({
@@ -48,6 +55,7 @@ export const actions: Actions = {
 				defaultMonthlyGramLimit: d.defaultMonthlyGramLimit,
 				defaultMonthlyJobLimit: d.defaultMonthlyJobLimit,
 				defaultCostPerKg: d.defaultCostPerKg.toFixed(2),
+				settings,
 				updatedAt: new Date()
 			})
 			.where(eq(orgs.id, locals.user!.orgId));

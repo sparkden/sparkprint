@@ -82,6 +82,10 @@
 	const time = $derived(now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true }));
 	const date = $derived(now.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' }));
 
+	const appHost = $derived.by(() => {
+		try { return new URL(data.appUrl).host; } catch { return data.appUrl; }
+	});
+
 	const thumb = (modelId: string | null, hasThumb: unknown) =>
 		modelId && hasThumb ? `/files/${modelId}/thumb${data.kiosk ? `?kiosk=${data.kioskToken}` : ''}` : null;
 </script>
@@ -92,13 +96,21 @@
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="flex items-center gap-3.5">
-			<img src="/immaculata-seal.png" alt="Immaculata High School" class="h-12 w-12 shrink-0 object-contain" />
+			<img src="/immaculata-seal.png" alt="" class="h-12 w-12 shrink-0 object-contain" />
 			<div>
-				<p class="text-2xl font-bold leading-none tracking-tight text-ink" style="font-family: var(--font-display)">Immaculata</p>
+				<p class="text-2xl font-bold leading-none tracking-tight text-ink" style="font-family: var(--font-display)">{data.orgName}</p>
 				<p class="mt-1 text-xs text-muted-ink">Live lab monitor</p>
 			</div>
 		</div>
 		<div class="flex items-center gap-3 text-sm font-semibold">
+			<!-- Scan to open the app on a phone -->
+			<div class="hidden items-center gap-2 rounded-xl border border-warm-200 bg-surface px-2.5 py-1.5 shadow-xs lg:flex">
+				<div class="h-14 w-14 shrink-0 [&>svg]:block [&>svg]:h-full [&>svg]:w-full">{@html data.appQr}</div>
+				<div class="leading-tight">
+					<div class="text-xs font-bold text-ink">Scan to print</div>
+					<div class="text-[10px] font-medium text-muted-ink">{appHost}</div>
+				</div>
+			</div>
 			<span class="badge badge-success">{free} free</span>
 			<span class="badge badge-spark">{printing} printing</span>
 			{#if ready > 0}<span class="badge badge-warning">{ready} to pick up</span>{/if}

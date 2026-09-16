@@ -2,13 +2,16 @@ import { fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { sql, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { users } from '$lib/server/db/schema';
+import { users, orgs } from '$lib/server/db/schema';
 import { verifyPassword, createSession } from '$lib/server/auth';
 import { rateLimit, sweep } from '$lib/server/ratelimit';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (locals.user) throw redirect(303, url.searchParams.get('next') || '/app');
+	// Only offer public sign-up before a lab exists (first run). Afterwards, joining is invite-only.
+	const [org] = await db.select({ id: orgs.id }).from(orgs).limit(1);
+	return { firstRun: !org };
 };
 
 const schema = z.object({

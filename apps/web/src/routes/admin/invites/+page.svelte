@@ -9,10 +9,16 @@
 
 	let open = $state(false);
 	let copied = $state<string | null>(null);
+	let qrInvite = $state<null | (typeof data.invites)[number]>(null);
+	let qrOpen = $state(false);
 
 	const origin = $derived(page.url.origin);
 	function link(token: string) {
 		return `${origin}/join/${token}`;
+	}
+	function showQr(i: (typeof data.invites)[number]) {
+		qrInvite = i;
+		qrOpen = true;
 	}
 	async function copy(token: string) {
 		await navigator.clipboard.writeText(link(token));
@@ -65,6 +71,7 @@
 						</p>
 					</div>
 					<div class="flex items-center gap-2">
+						<button class="btn btn-secondary btn-sm" onclick={() => showQr(i)} disabled={dead} title="Show a scannable QR code"><Icon name="box" size={15} /> QR</button>
 						<button class="btn btn-secondary btn-sm" onclick={() => copy(i.token)} disabled={dead}>
 							{copied === i.token ? 'Copied!' : 'Copy link'}
 						</button>
@@ -110,6 +117,7 @@
 			<div>
 				<label class="label" for="max">Max uses</label>
 				<input class="input" id="max" name="maxUses" type="number" min="1" placeholder="Unlimited" />
+				<p class="mt-1 text-xs text-muted-ink">Blank = one shared link a whole class can use.</p>
 			</div>
 			<div>
 				<label class="label" for="exp">Expires in (days)</label>
@@ -123,3 +131,26 @@
 		</div>
 	</form>
 </Modal>
+
+{#if qrInvite}
+	<Modal bind:open={qrOpen} title="Scan to join">
+		{@const inv = qrInvite}
+		<div class="flex flex-col items-center text-center">
+			<div class="w-56 max-w-full rounded-xl border border-warm-200 bg-white p-3 [&>svg]:block [&>svg]:h-full [&>svg]:w-full">
+				{@html inv.qr}
+			</div>
+			<p class="mt-4 text-sm text-soft-ink">
+				Point a phone camera at this code to join
+				{#if inv.role !== 'student'}as a <span class="font-semibold capitalize">{inv.role}</span>{/if}.
+			</p>
+			<code class="mt-3 w-full truncate rounded-md bg-warm-100 px-2 py-1.5 text-xs text-soft-ink">{link(inv.token)}</code>
+			<p class="mt-2 text-xs text-muted-ink">
+				{inv.maxUses != null ? `Up to ${inv.maxUses} people` : 'Anyone with the link — share it with a whole class'}
+			</p>
+			<div class="mt-4 flex gap-2">
+				<button type="button" class="btn btn-secondary btn-sm" onclick={() => copy(inv.token)}>{copied === inv.token ? 'Copied!' : 'Copy link'}</button>
+				<button type="button" class="btn btn-primary btn-sm" onclick={() => (qrOpen = false)}>Done</button>
+			</div>
+		</div>
+	</Modal>
+{/if}

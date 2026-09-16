@@ -35,8 +35,14 @@
 		<div class="card space-y-4 p-6">
 			<h2 class="text-lg font-semibold">General</h2>
 			<div>
-				<label class="label" for="name">Lab name</label>
+				<label class="label" for="name">School / lab name</label>
 				<input class="input" id="name" name="name" value={data.org.name} required />
+				<p class="mt-1.5 text-xs text-muted-ink">Shown on the lab monitor, login screen, and throughout the app.</p>
+			</div>
+			<div>
+				<label class="label" for="appUrl">Public app URL <span class="font-normal text-muted-ink">(for the kiosk QR code)</span></label>
+				<input class="input" id="appUrl" name="appUrl" type="url" value={(data.org.settings?.appUrl as string | undefined) ?? ''} placeholder="https://print.ethans.app" />
+				<p class="mt-1.5 text-xs text-muted-ink">Students scan this on the lab monitor to open the app on their phones.</p>
 			</div>
 		</div>
 

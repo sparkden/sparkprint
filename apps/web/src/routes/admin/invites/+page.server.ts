@@ -5,9 +5,10 @@ import { db } from '$lib/server/db';
 import { invites, users } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
 import { inviteToken } from '$lib/server/util';
+import { qrSvg } from '$lib/server/qr';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	const me = requireAdmin(locals.user);
 	const rows = await db
 		.select({
@@ -27,7 +28,11 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.leftJoin(users, eq(invites.createdBy, users.id))
 		.where(eq(invites.orgId, me.orgId))
 		.orderBy(desc(invites.createdAt));
-	return { invites: rows };
+	// A scannable QR for each join link (points at the public origin so phones can reach it).
+	const withQr = await Promise.all(
+		rows.map(async (r) => ({ ...r, qr: await qrSvg(`${url.origin}/join/${r.token}`) }))
+	);
+	return { invites: withQr, origin: url.origin };
 };
 
 const optInt = z.preprocess(

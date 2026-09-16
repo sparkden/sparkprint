@@ -7,6 +7,7 @@ import { checkoutJob, cancelJob, markDone } from '$lib/server/jobs';
 import { manager } from '$lib/server/bambu/manager';
 import { kioskOrgId } from '$lib/server/settings';
 import { getWeather } from '$lib/server/weather';
+import { qrSvg, DEFAULT_APP_URL } from '$lib/server/qr';
 import type { Actions, PageServerLoad } from './$types';
 
 const EXT_INDEX = 254; // the external spool lives as a pseudo-AMS unit at this index
@@ -36,6 +37,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		if (k) { user = { orgId: k.orgId, orgName: k.orgName, role: 'student' }; kiosk = true; }
 	}
 	if (!user) throw redirect(303, '/login?next=/monitor');
+
+	// QR to the public app so students can open it on their phones straight from the lab board.
+	const [orgRow] = await db.select({ settings: orgs.settings }).from(orgs).where(eq(orgs.id, user.orgId)).limit(1);
+	const appUrl = ((orgRow?.settings as Record<string, unknown> | undefined)?.appUrl as string) || DEFAULT_APP_URL;
+	const appQr = await qrSvg(appUrl);
 
 	const rows = await db
 		.select({
@@ -115,7 +121,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		isStaff: !kiosk && ['owner', 'admin', 'teacher'].includes(user.role),
 		kiosk,
 		kioskToken: kiosk ? (url.searchParams.get('kiosk') ?? '') : '',
-		weather: await getWeather()
+		weather: await getWeather(),
+		appUrl,
+		appQr
 	};
 };
 

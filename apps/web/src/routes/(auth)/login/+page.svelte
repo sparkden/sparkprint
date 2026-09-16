@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	let { form } = $props();
+	let { data, form } = $props();
 	let loading = $state(false);
 </script>
 
@@ -38,7 +38,13 @@
 		<button class="btn btn-primary w-full" disabled={loading}>{loading ? 'Logging in…' : 'Log in'}</button>
 	</form>
 
-	<p class="mt-5 text-center text-sm text-soft-ink">
-		New here? <a href="/signup" class="font-semibold text-spark hover:underline">Create an account</a>
-	</p>
+	{#if data.firstRun}
+		<p class="mt-5 text-center text-sm text-soft-ink">
+			New here? <a href="/signup" class="font-semibold text-spark hover:underline">Set up your lab</a>
+		</p>
+	{:else}
+		<p class="mt-5 text-center text-sm text-muted-ink">
+			Need access? Ask a teacher or admin for an invite link.
+		</p>
+	{/if}
 </div>

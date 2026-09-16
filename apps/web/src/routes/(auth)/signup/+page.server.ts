@@ -26,6 +26,11 @@ export const actions: Actions = {
 		const form = Object.fromEntries(await request.formData());
 		const firstRun = !(await isInitialized());
 
+		// Once the lab exists, public sign-up is closed — new people must use an invite link.
+		if (!firstRun) {
+			return fail(403, { values: { schoolName: '', name: '', email: '' }, error: 'This lab is invite-only. Ask an admin for an invite link to join.' });
+		}
+
 		const schema = z.object({
 			// School name is only needed when creating the lab (first run).
 			schoolName: firstRun ? z.string().min(2, 'School/lab name is too short').max(80) : z.string().optional(),
