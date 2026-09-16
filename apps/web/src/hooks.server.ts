@@ -17,6 +17,32 @@ const RULES: { prefix: string; min: 'student' | 'teacher' | 'admin' | 'owner' }[
 	{ prefix: '/app', min: 'student' }
 ];
 
+// A LAN-aware CSRF origin check (replaces SvelteKit's built-in one, disabled in svelte.config.js).
+// Form POSTs are allowed when their Origin is the server's own configured origin (public URL behind
+// the tunnel) OR a loopback/LAN address — so the no-login kiosk on http://localhost and LAN admins
+// work — while genuine external cross-site POSTs are still blocked.
+const FORM_CONTENT_TYPES = ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'];
+function isLanHost(host: string): boolean {
+	const h = (host || '').split(':')[0].toLowerCase();
+	if (!h) return false;
+	if (h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '::1' || h.endsWith('.local')) return true;
+	if (/^10\.\d+\.\d+\.\d+$/.test(h)) return true; // 10.0.0.0/8
+	if (/^192\.168\.\d+\.\d+$/.test(h)) return true; // 192.168.0.0/16
+	if (/^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(h)) return true; // 172.16.0.0/12
+	return false;
+}
+function csrfForbidden(event: Parameters<Handle>[0]['event']): boolean {
+	const method = event.request.method;
+	if (method === 'GET' || method === 'HEAD') return false;
+	const ct = (event.request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+	if (!FORM_CONTENT_TYPES.includes(ct)) return false; // non-form (JSON fetch) isn't cross-site CSRF-able
+	const origin = event.request.headers.get('origin');
+	if (!origin) return false; // browsers send Origin on cross-site POST; missing → same-origin/native
+	let host = '';
+	try { host = new URL(origin).host; } catch { return true; } // unparseable Origin → reject
+	return !(host === event.url.host || isLanHost(host));
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
 	const token = getSessionToken(event.cookies);
 	const user = token ? await validateSession(token) : null;
@@ -24,6 +50,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.sessionId = token;
 
 	const path = event.url.pathname;
+
+	// CSRF: reject external cross-site form POSTs (kiosk/LAN origins are allowed — see above).
+	if (csrfForbidden(event)) {
+		return new Response('Cross-site POST form submissions are forbidden', { status: 403 });
+	}
 
 	// First-run: until a lab exists, funnel everything into sign-up (the first user creates it).
 	if (path !== '/healthz' && !path.startsWith('/signup')) {
