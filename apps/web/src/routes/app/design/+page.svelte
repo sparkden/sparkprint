@@ -8,8 +8,18 @@
 	import { colorDistance } from '$lib/color';
 	let { data, form } = $props();
 
-	let printOpen = $state(true); // the docked print-settings panel
+	let printOpen = $state(true); // the print-settings panel (bottom sheet on phones)
 	const PANEL_W = 340;
+
+	// On phones the panel is a bottom sheet, so the editor keeps the full width (no right inset).
+	let isMobile = $state(false);
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 767px)');
+		const update = () => (isMobile = mq.matches);
+		update();
+		mq.addEventListener('change', update);
+		return () => mq.removeEventListener('change', update);
+	});
 
 	type LabColor = (typeof data.colors)[number];
 	// Render a stored color safely: ensure a leading #, tolerate 8-digit RRGGBBAA, else fall back.
@@ -183,7 +193,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#1E2F66'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#1E2F66'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={!isMobile && printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
@@ -195,20 +205,20 @@
 	</div>
 
 	<!-- Top-left workspace bar -->
-	<div class="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-xl border border-warm-200 bg-surface/95 px-2 py-1.5 shadow-lg backdrop-blur">
-		<a href="/app" class="flex h-8 items-center gap-1 rounded-lg px-2 text-sm text-soft-ink hover:bg-warm-100" title="Back"><Icon name="chevronRight" size={15} /><span class="rotate-180"></span>Exit</a>
+	<div class="absolute left-3 top-3 z-30 flex items-center gap-1.5 rounded-xl border border-warm-200 bg-surface/95 px-2 py-1.5 shadow-lg backdrop-blur">
+		<a href="/app" class="flex h-8 items-center gap-1 rounded-lg px-2 text-sm text-soft-ink hover:bg-warm-100" title="Exit"><Icon name="chevronRight" size={15} /><span class="rotate-180"></span><span class="hidden sm:inline">Exit</span></a>
 		<span class="h-5 w-px bg-warm-200"></span>
-		<button type="button" class="btn btn-secondary btn-sm" onclick={() => fileInput?.click()}><Icon name="plus" size={14} /> Add model</button>
-		<button type="button" title="Show a pencil & paperclip beside the plate for scale" onclick={() => (showRef = !showRef)} class="btn btn-sm {showRef ? 'btn-primary' : 'btn-secondary'}"><Icon name="scale" size={14} /> Reference</button>
+		<button type="button" title="Add model" class="btn btn-secondary btn-sm" onclick={() => fileInput?.click()}><Icon name="plus" size={14} /> <span class="hidden sm:inline">Add model</span></button>
+		<button type="button" title="Show a pencil & paperclip beside the plate for scale" onclick={() => (showRef = !showRef)} class="btn btn-sm {showRef ? 'btn-primary' : 'btn-secondary'}"><Icon name="scale" size={14} /> <span class="hidden sm:inline">Reference</span></button>
 		{#if !form?.success && !printOpen}
-			<button type="button" class="btn btn-primary btn-sm" onclick={() => (printOpen = true)}><Icon name="bolt" size={14} /> Print</button>
+			<button type="button" title="Print" class="btn btn-primary btn-sm" onclick={() => (printOpen = true)}><Icon name="bolt" size={14} /> <span class="hidden sm:inline">Print</span></button>
 		{/if}
-		{#if stats}<span class="hidden px-1 text-xs text-muted-ink sm:inline">{stats.bbox.x}×{stats.bbox.y}×{stats.bbox.z} mm</span>{/if}
+		{#if stats}<span class="hidden px-1 text-xs text-muted-ink lg:inline">{stats.bbox.x}×{stats.bbox.y}×{stats.bbox.z} mm</span>{/if}
 	</div>
 
-	<!-- Print settings — docked to the right edge (closeable, never blocks the plate) -->
+	<!-- Print settings — a bottom sheet on phones, docked to the right edge on wider screens. -->
 	{#if !form?.success && printOpen}
-		<aside class="absolute bottom-0 right-0 top-0 z-30 flex w-[340px] flex-col border-l border-warm-200 bg-surface/95 shadow-xl backdrop-blur">
+		<aside class="absolute inset-x-0 bottom-0 z-30 flex max-h-[78svh] flex-col rounded-t-2xl border-t border-warm-200 bg-surface/95 shadow-xl backdrop-blur md:inset-x-auto md:right-0 md:top-0 md:max-h-none md:w-[340px] md:rounded-none md:border-l md:border-t-0">
 			<header class="flex items-center gap-2 border-b border-warm-200 px-4 py-3">
 				<Icon name="bolt" size={16} /><span class="flex-1 text-sm font-semibold text-ink">Print</span>
 				<button type="button" title="Hide" class="rounded p-1 text-muted-ink hover:bg-warm-100 hover:text-ink" onclick={() => (printOpen = false)}><Icon name="x" size={16} /></button>

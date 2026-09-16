@@ -1,0 +1,16 @@
+{
+  "name": "LataPrint",
+  "short_name": "LataPrint",
+  "description": "3D printer management for Immaculata High School — design, queue, and track your prints.",
+  "id": "/",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#14224d",
+  "theme_color": "#14224d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "/immaculata-seal.png", "sizes": "447x447", "type": "image/png", "purpose": "any" }
+  ]
+}

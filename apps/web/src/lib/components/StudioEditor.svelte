@@ -190,7 +190,7 @@
 		if (measurePts.length === 2) {
 			measureDist = +measurePts[0].distanceTo(measurePts[1]).toFixed(2);
 			const geo = new THREE.BufferGeometry().setFromPoints(measurePts);
-			measureLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff5b14 }));
+			measureLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x1e2f66 }));
 			scene.add(measureLine);
 		}
 	}
@@ -494,19 +494,19 @@
 		if (plateGroup) scene.remove(plateGroup);
 		plateGroup = new THREE.Group();
 		const mx = Math.max(plate.x, plate.y);
-		const grid = new THREE.GridHelper(mx, Math.round(mx / 20), 0xb6aba0, 0xd6ccbc);
+		const grid = new THREE.GridHelper(mx, Math.round(mx / 20), 0x9aa4bd, 0xcbd3e3);
 		(grid.material as any).opacity = 0.8; (grid.material as any).transparent = true;
 		plateGroup.add(grid);
-		const plane = new THREE.Mesh(new THREE.PlaneGeometry(plate.x, plate.y), new THREE.MeshStandardMaterial({ color: 0xece3d5, roughness: 0.95 }));
+		const plane = new THREE.Mesh(new THREE.PlaneGeometry(plate.x, plate.y), new THREE.MeshStandardMaterial({ color: 0xe6eaf3, roughness: 0.95 }));
 		plane.rotation.x = -Math.PI / 2; plane.position.y = -0.12; plane.receiveShadow = true; plateGroup.add(plane);
-		plateGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(plate.x, 0.2, plate.y)), new THREE.LineBasicMaterial({ color: 0xff5b14 })));
+		plateGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(plate.x, 0.2, plate.y)), new THREE.LineBasicMaterial({ color: 0x1e2f66 })));
 
 		// Ruler: labeled ticks every 50 mm along the front (X) and left (Y) edges.
 		const label = (text: string) => {
 			const c = document.createElement('canvas');
 			c.width = 96; c.height = 48;
 			const ctx = c.getContext('2d')!;
-			ctx.fillStyle = '#5d534a'; ctx.font = 'bold 30px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+			ctx.fillStyle = '#545e77'; ctx.font = 'bold 30px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 			ctx.fillText(text, 48, 24);
 			const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false, depthWrite: false }));
 			spr.scale.set(24, 12, 1);
@@ -751,7 +751,7 @@
 			const { TransformControls } = await import('three/addons/controls/TransformControls.js');
 
 			scene = new THREE.Scene();
-			scene.background = new THREE.Color('#FBF5EC'); // light warm-paper viewport
+			scene.background = new THREE.Color('#eef1f7'); // cool blue-grey viewport
 			camera = new THREE.PerspectiveCamera(45, 1, 0.1, 9000);
 			camera.position.set(240, 200, 240);
 			renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -763,7 +763,7 @@
 			orbit.enableDamping = true; orbit.dampingFactor = 0.08; orbit.maxPolarAngle = Math.PI / 2.02;
 			raycaster = new THREE.Raycaster();
 
-			scene.add(new THREE.HemisphereLight(0xffffff, 0xd6ccbc, 1.15));
+			scene.add(new THREE.HemisphereLight(0xffffff, 0xd7deed, 1.15));
 			const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(120, 240, 150); key.castShadow = true;
 			key.shadow.mapSize.set(2048, 2048); key.shadow.camera.near = 1; key.shadow.camera.far = 1600; scene.add(key);
 			buildPlate();
@@ -877,7 +877,7 @@
 
 	{#if objects.length}
 		<!-- Tool rail -->
-		<div class="absolute left-3 top-1/2 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-warm-200 bg-surface/95 p-1.5 shadow-lg backdrop-blur">
+		<div class="absolute left-3 top-1/2 flex max-h-[86svh] -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded-xl border border-warm-200 bg-surface/95 p-1.5 shadow-lg backdrop-blur">
 			{#each tools as t}
 				<button type="button" title="{t.label} ({t.key})" onclick={() => applyMode(t.id)} class="flex h-9 w-9 items-center justify-center rounded-lg transition-colors {mode === t.id ? 'bg-spark text-white' : 'text-soft-ink hover:bg-warm-100'}"><Icon name={t.icon} size={18} /></button>
 			{/each}
