@@ -207,7 +207,14 @@
 				{:else if p.status === 'idle' && p.online}
 					<p class="mt-6 text-center text-2xl font-bold text-success">Available</p>
 				{:else}
-					<p class="mt-6 text-center text-sm text-muted-ink">{p.online ? 'Not available' : 'Offline'}</p>
+					<div class="mt-6 text-center">
+						<p class="text-sm font-medium {p.status === 'error' ? 'text-danger' : 'text-muted-ink'}">{p.status === 'error' ? 'Printer error' : p.online ? 'Not available' : 'Offline'}</p>
+						<form method="POST" action="?/recheck" use:enhance class="mt-2">
+							<input type="hidden" name="printerId" value={p.id} />
+							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
+							<button class="btn btn-secondary btn-sm"><Icon name="refresh" size={14} /> Recheck status</button>
+						</form>
+					</div>
 				{/if}
 
 				<!-- Filament loaded in this printer — tap a swatch to edit, or unload. -->

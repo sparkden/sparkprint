@@ -58,6 +58,10 @@
 							{:else if !p.enabled}
 								<span class="badge badge-neutral" title="Manually excluded from the print queue.">Excluded</span>
 							{/if}
+							<form method="POST" action="?/recheck" use:enhance>
+								<input type="hidden" name="id" value={p.id} />
+								<button class="mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold text-soft-ink transition-colors hover:bg-warm-100" title="Reconnect and refresh this printer's status"><Icon name="refresh" size={13} /> Recheck</button>
+							</form>
 						</div>
 					</div>
 

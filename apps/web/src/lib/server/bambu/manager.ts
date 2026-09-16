@@ -136,6 +136,32 @@ class BambuManager {
 		return true;
 	}
 
+	/**
+	 * Recheck one printer: reconnect if the local link is down, ask for fresh telemetry, and unstick a
+	 * stale error/offline status (Bambu keeps reporting FAILED until the next print, which otherwise
+	 * strands the printer). Returns whether the local link is up. Used by the "Recheck" buttons.
+	 */
+	async recheck(printerId: string): Promise<boolean> {
+		if (!this.isConnected(printerId)) {
+			await this.connectLanPrinter(printerId).catch(() => {});
+			await new Promise((r) => setTimeout(r, 1500)); // let the socket come up
+		}
+		const connected = this.isConnected(printerId);
+		if (connected) this.requestStatus(printerId); // pull real state; telemetry will correct the DB
+		const [p] = await db
+			.select({ status: printers.status, currentJobId: printers.currentJobId })
+			.from(printers)
+			.where(eq(printers.id, printerId))
+			.limit(1);
+		// With no job tracked here, reflect the true link state so a stuck 'error'/'offline' clears.
+		if (p && !p.currentJobId && (p.status === 'error' || p.status === 'offline')) {
+			await db.update(printers).set({ status: connected ? 'idle' : 'offline', online: connected, updatedAt: new Date() }).where(eq(printers.id, printerId));
+		} else {
+			await db.update(printers).set({ online: connected, updatedAt: new Date() }).where(eq(printers.id, printerId));
+		}
+		return connected;
+	}
+
 	/** Ask a printer to push its full status (incl. AMS) — used by the "Reload AMS" button. */
 	requestStatus(printerId: string) {
 		return this.command(printerId, { pushing: { sequence_id: this.nextSeq(), command: 'pushall', version: 1, push_target: 1 } }, 0);

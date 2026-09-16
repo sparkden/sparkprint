@@ -62,6 +62,16 @@ export const actions: Actions = {
 		return ok ? { success: true } : fail(400, { error: 'Printer not connected.' });
 	},
 
+	// Recheck a printer's status: reconnect if needed, pull fresh telemetry, and clear a stuck error.
+	recheck: async ({ request, locals }) => {
+		const me = requireAdmin(locals.user);
+		const id = String((await request.formData()).get('id'));
+		const [p] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId))).limit(1);
+		if (!p) return fail(404, { error: 'Printer not found.' });
+		const connected = await manager().recheck(id);
+		return { success: true, message: connected ? 'Rechecked — printer is online.' : 'Printer is not responding on the network.' };
+	},
+
 	addManual: async ({ request, locals }) => {
 		const me = requireAdmin(locals.user);
 		const fd = await request.formData();

@@ -238,6 +238,18 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
+	// Recheck a printer's status (reconnect + pull fresh telemetry + clear a stuck error).
+	recheck: async ({ request, locals, url }) => {
+		const fd = await request.formData();
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(401, { error: 'Sign in' });
+		const printerId = String(fd.get('printerId'));
+		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
+		if (!printer) return fail(404, { error: 'Printer not found' });
+		const connected = await manager().recheck(printerId);
+		return { success: true, message: connected ? 'Rechecked — printer is online.' : 'Printer is not responding on the network.' };
+	},
+
 	// Unload whatever filament is currently loaded (AMS active tray or the external spool).
 	unloadFilament: async ({ request, locals, url }) => {
 		const fd = await request.formData();

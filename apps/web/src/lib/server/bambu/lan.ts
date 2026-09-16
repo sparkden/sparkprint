@@ -135,9 +135,12 @@ function lanCommand(params: LanPrintParams): Promise<void> {
 					file: params.fileName,
 					url: `ftp:///${params.fileName}`, // file at the FTP root
 					md5: '',
-					bed_type: params.bedType ?? 'auto',
-					bed_leveling: true,
-					flow_cali: false,
+					// Bambu bed_type enum: cool_plate | eng_plate | hot_plate | textured_pei_plate | ...
+					// Must match the plate the gcode was sliced for so plate-specific Z/temperature
+					// calibration is applied. Default to the Textured PEI plate (OrcaSlicer's default).
+					bed_type: params.bedType ?? 'textured_pei_plate',
+					bed_leveling: true, // run the printer's auto bed-leveling sequence before printing
+					flow_cali: false, // use the profile's pre-calibrated flow (matches Bambu Studio default)
 					vibration_cali: true,
 					layer_inspect: false,
 					timelapse: false,

@@ -208,7 +208,11 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				fileName: `${jobId}.gcode.3mf`,
 				amsMapping,
 				useAms: p.hasAms && mapping.length > 0, // external-spool printers print without AMS
-				bedType: 'textured_plate',
+				// Must be a real Bambu bed_type and match the plate the gcode was sliced for (OrcaSlicer
+				// defaults to the Textured PEI plate). A bogus value ("textured_plate") makes the firmware
+				// skip that plate's first-layer Z/temperature calibration → good first layers, then the
+				// print drifts off the bed into spaghetti.
+				bedType: 'textured_pei_plate',
 				plateIdx: 1
 			});
 			await logEvent(jobId, 'dispatch', `Sent to ${p.name}`, { printerId: p.id, mapping });

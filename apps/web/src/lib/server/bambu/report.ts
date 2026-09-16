@@ -95,6 +95,9 @@ async function applyReportForPrinter(printer: typeof printers.$inferSelect, prin
 		// tracked job, a stale/external FINISH just means the bed is free → treat it as idle so the
 		// printer doesn't get stuck unusable.
 		if (s === 'finished' && !printer.currentJobId) s = 'idle';
+		// A Bambu printer keeps reporting FAILED until the next print clears it. If we aren't tracking a
+		// job here, that stale error shouldn't strand the printer as unusable — treat it as idle (free).
+		if (s === 'error' && !printer.currentJobId) s = 'idle';
 		patch.status = s;
 	}
 	if (print.mc_percent != null) patch.progressPct = numOrNull(print.mc_percent);
