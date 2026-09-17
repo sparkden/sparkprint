@@ -15,7 +15,7 @@
 	<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<h1 class="text-2xl font-semibold">{data.member.name}</h1>
-			<p class="text-sm text-muted-ink">{data.member.email} · <span class="capitalize">{data.member.role}</span>{#if data.member.status === 'suspended'} · <span class="text-danger">suspended</span>{/if}</p>
+			<p class="text-sm text-muted-ink">{data.member.email} · <span class="capitalize">{data.member.role === 'teacher' ? 'staff' : data.member.role}</span>{#if data.member.status === 'suspended'} · <span class="text-danger">suspended</span>{/if}</p>
 		</div>
 	</div>
 

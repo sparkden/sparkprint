@@ -8,6 +8,7 @@ import {
 	amsUnits,
 	amsSlots,
 	orgs,
+	users,
 	type ColorRequest,
 	type ColorMapping
 } from './db/schema';
@@ -370,7 +371,13 @@ export async function submitJob(input: SubmitInput) {
 		return { ok: false as const, error: check.reason!, usage: check.usage };
 	}
 
-	const needsApproval = !!org?.approvalMode;
+	// Approval: on when the org requires it — but staff/admins/owners skip the queue if the org has
+	// "Staff & admins skip approval" enabled.
+	let needsApproval = !!org?.approvalMode;
+	if (needsApproval && (org?.settings as Record<string, unknown> | undefined)?.bypassApprovalStaff) {
+		const [submitter] = await db.select({ role: users.role }).from(users).where(eq(users.id, input.userId)).limit(1);
+		if (submitter && ['owner', 'admin', 'teacher'].includes(submitter.role)) needsApproval = false;
+	}
 	await db
 		.update(printJobs)
 		.set({

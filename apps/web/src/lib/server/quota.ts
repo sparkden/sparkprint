@@ -40,10 +40,12 @@ export async function getUsage(userId: string): Promise<QuotaUsage> {
 
 	const [u] = await db
 		.select({
+			role: users.role,
 			monthlyGramLimit: users.monthlyGramLimit,
 			monthlyJobLimit: users.monthlyJobLimit,
 			defG: orgs.defaultMonthlyGramLimit,
-			defJ: orgs.defaultMonthlyJobLimit
+			defJ: orgs.defaultMonthlyJobLimit,
+			settings: orgs.settings
 		})
 		.from(users)
 		.innerJoin(orgs, eq(users.orgId, orgs.id))
@@ -64,8 +66,14 @@ export async function getUsage(userId: string): Promise<QuotaUsage> {
 			)
 		);
 
-	const gramLimit = u?.monthlyGramLimit ?? u?.defG ?? null;
-	const jobLimit = u?.monthlyJobLimit ?? u?.defJ ?? null;
+	// Staff/admins/owners use the "staff default" quota (from org settings) instead of the student
+	// default. An individual per-person override still wins; blank staff default = unlimited.
+	const isStaff = ['owner', 'admin', 'teacher'].includes(u?.role ?? 'student');
+	const st = (u?.settings ?? {}) as Record<string, unknown>;
+	const staffG = typeof st.staffGramLimit === 'number' ? st.staffGramLimit : null;
+	const staffJ = typeof st.staffJobLimit === 'number' ? st.staffJobLimit : null;
+	const gramLimit = u?.monthlyGramLimit ?? (isStaff ? staffG : u?.defG) ?? null;
+	const jobLimit = u?.monthlyJobLimit ?? (isStaff ? staffJ : u?.defJ) ?? null;
 	const gramsUsed = Math.round(Number(agg?.grams ?? 0));
 	const jobsUsed = Number(agg?.jobs ?? 0);
 

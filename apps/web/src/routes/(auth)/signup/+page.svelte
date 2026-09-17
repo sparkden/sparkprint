@@ -14,7 +14,7 @@
 		<div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-spark-soft text-spark-deep"><Icon name="link" size={24} /></div>
 		<h1 class="text-2xl font-semibold">Invite only</h1>
 		<p class="mt-1.5 text-sm text-soft-ink">
-			{data.orgName ?? 'This lab'} is set up. New members join with an invite link from a teacher or admin —
+			{data.orgName ?? 'This lab'} is set up. New members join with an invite link from a staff member or admin —
 			ask them to send you one.
 		</p>
 		<a href="/login" class="btn btn-primary mt-6 w-full">Log in</a>

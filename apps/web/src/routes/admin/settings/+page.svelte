@@ -58,14 +58,20 @@
 				name="approvalMode"
 				checked={data.org.approvalMode}
 				label="Require approval"
-				description="Students' prints wait for a teacher or admin to approve before printing."
+				description="Students' prints wait for a staff member or admin to approve before printing."
+			/>
+			<Toggle
+				name="bypassApprovalStaff"
+				checked={!!data.org.settings?.bypassApprovalStaff}
+				label="Staff & admins skip approval"
+				description="When approval is required, prints from staff, admins and owners still go straight to the queue."
 			/>
 		</div>
 
 		<div class="card space-y-4 p-6">
-			<h2 class="text-lg font-semibold">Default quotas</h2>
+			<h2 class="text-lg font-semibold">Student default quotas</h2>
 			<p class="-mt-2 text-sm text-muted-ink">
-				Applied to new members. Leave blank for unlimited. Override per-person on the Members page.
+				Applied to new students. Leave blank for unlimited. Override per-person on the Members page.
 			</p>
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div>
@@ -75,6 +81,23 @@
 				<div>
 					<label class="label" for="j">Prints per month</label>
 					<input class="input" id="j" name="defaultMonthlyJobLimit" type="number" min="0" value={data.org.defaultMonthlyJobLimit ?? ''} placeholder="Unlimited" />
+				</div>
+			</div>
+		</div>
+
+		<div class="card space-y-4 p-6">
+			<h2 class="text-lg font-semibold">Staff &amp; admin default quotas</h2>
+			<p class="-mt-2 text-sm text-muted-ink">
+				Applied to staff, admins and owners (instead of the student default). Leave blank for unlimited. Per-person overrides on the Members page still win.
+			</p>
+			<div class="grid gap-4 sm:grid-cols-2">
+				<div>
+					<label class="label" for="sg">Filament per month (g)</label>
+					<input class="input" id="sg" name="staffGramLimit" type="number" min="0" value={(data.org.settings?.staffGramLimit as number | undefined) ?? ''} placeholder="Unlimited" />
+				</div>
+				<div>
+					<label class="label" for="sj">Prints per month</label>
+					<input class="input" id="sj" name="staffJobLimit" type="number" min="0" value={(data.org.settings?.staffJobLimit as number | undefined) ?? ''} placeholder="Unlimited" />
 				</div>
 			</div>
 		</div>

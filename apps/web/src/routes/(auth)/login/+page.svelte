@@ -44,7 +44,7 @@
 		</p>
 	{:else}
 		<p class="mt-5 text-center text-sm text-muted-ink">
-			Need access? Ask a teacher or admin for an invite link.
+			Need access? Ask a staff member or admin for an invite link.
 		</p>
 	{/if}
 </div>

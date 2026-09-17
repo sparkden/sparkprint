@@ -24,6 +24,11 @@ const schema = z.object({
 	defaultMonthlyGramLimit: optInt,
 	defaultMonthlyJobLimit: optInt,
 	defaultCostPerKg: z.coerce.number().min(0).max(9999),
+	// Staff/admin default quota (applies to staff, admins & owners instead of the student default).
+	staffGramLimit: optInt,
+	staffJobLimit: optInt,
+	// Let staff & admins skip the approval queue even when approval mode is on.
+	bypassApprovalStaff: z.coerce.boolean(),
 	// Public URL students scan on the kiosk QR to reach the app on their phones.
 	appUrl: z.preprocess(
 		(v) => (v ? String(v).trim() : ''),
@@ -38,14 +43,21 @@ export const actions: Actions = {
 		const form = {
 			...raw,
 			queueEnabled: raw.queueEnabled === 'on',
-			approvalMode: raw.approvalMode === 'on'
+			approvalMode: raw.approvalMode === 'on',
+			bypassApprovalStaff: raw.bypassApprovalStaff === 'on'
 		};
 		const parsed = schema.safeParse(form);
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
 
 		const d = parsed.data;
 		const [org] = await db.select({ settings: orgs.settings }).from(orgs).where(eq(orgs.id, locals.user!.orgId)).limit(1);
-		const settings = { ...(org?.settings ?? {}), appUrl: d.appUrl || undefined };
+		const settings = {
+			...(org?.settings ?? {}),
+			appUrl: d.appUrl || undefined,
+			staffGramLimit: d.staffGramLimit ?? undefined,
+			staffJobLimit: d.staffJobLimit ?? undefined,
+			bypassApprovalStaff: d.bypassApprovalStaff
+		};
 		await db
 			.update(orgs)
 			.set({

@@ -19,6 +19,8 @@
 		teacher: 'badge-warning',
 		student: 'badge-neutral'
 	};
+	// "teacher" is displayed as "Staff" (the internal role value is unchanged).
+	const roleLabel = (r: string) => (r === 'teacher' ? 'staff' : r);
 
 	function manage(m: (typeof data.members)[number]) {
 		editingId = m.id;
@@ -61,7 +63,7 @@
 								<div class="text-xs text-muted-ink">{m.email}</div>
 							</td>
 							<td class="px-5 py-3">
-								<span class="badge {roleBadge[m.role]} capitalize">{m.role}</span>
+								<span class="badge {roleBadge[m.role]} capitalize">{roleLabel(m.role)}</span>
 								{#if m.status === 'suspended'}<span class="badge badge-danger ml-1">Suspended</span>{/if}
 							</td>
 							<td class="px-5 py-3 text-soft-ink tabular-nums">
@@ -101,7 +103,7 @@
 					<label class="label" for="role">Role</label>
 					<select class="select" id="role" name="role" value={m.role} disabled={m.role === 'owner' && !canEditOwners}>
 						<option value="student">Student</option>
-						<option value="teacher">Teacher</option>
+						<option value="teacher">Staff</option>
 						<option value="admin" disabled={!canEditOwners}>Admin</option>
 						<option value="owner" disabled={!canEditOwners}>Owner</option>
 					</select>

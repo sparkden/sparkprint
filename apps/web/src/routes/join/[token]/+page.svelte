@@ -8,7 +8,7 @@
 	const roleLabel: Record<string, string> = {
 		owner: 'an owner',
 		admin: 'an admin',
-		teacher: 'a teacher',
+		teacher: 'staff',
 		student: 'a student'
 	};
 </script>

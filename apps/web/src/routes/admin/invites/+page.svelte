@@ -57,7 +57,7 @@
 				<div class="card flex flex-wrap items-center gap-4 p-4 {dead ? 'opacity-60' : ''}">
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
-							<span class="badge badge-info capitalize">{i.role}</span>
+							<span class="badge badge-info capitalize">{i.role === 'teacher' ? 'staff' : i.role}</span>
 							{#if i.email}<span class="text-xs text-muted-ink">for {i.email}</span>{/if}
 							{#if dead}<span class="badge badge-danger">{exhausted(i) ? 'Used up' : 'Expired'}</span>{/if}
 						</div>
@@ -97,7 +97,7 @@
 			<label class="label" for="role">Role</label>
 			<select class="select" id="role" name="role">
 				<option value="student">Student</option>
-				<option value="teacher">Teacher</option>
+				<option value="teacher">Staff</option>
 				<option value="admin">Admin</option>
 			</select>
 		</div>
@@ -141,7 +141,7 @@
 			</div>
 			<p class="mt-4 text-sm text-soft-ink">
 				Point a phone camera at this code to join
-				{#if inv.role !== 'student'}as a <span class="font-semibold capitalize">{inv.role}</span>{/if}.
+				{#if inv.role !== 'student'}as {inv.role === 'teacher' ? 'staff' : `an ${inv.role}`}{/if}.
 			</p>
 			<code class="mt-3 w-full truncate rounded-md bg-warm-100 px-2 py-1.5 text-xs text-soft-ink">{link(inv.token)}</code>
 			<p class="mt-2 text-xs text-muted-ink">

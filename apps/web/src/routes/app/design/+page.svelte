@@ -318,7 +318,7 @@
 
 					<div>
 						<div class="mb-2 flex items-center justify-between"><span class="label mb-0">Color</span>{#if anyColor}<span class="text-xs text-muted-ink">No preference</span>{:else if selected}<span class="text-xs text-muted-ink">{selected.colorName ?? selected.colorHex} · {selected.filamentType}</span>{/if}</div>
-						{#if data.colors.length === 0}<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
+						{#if data.colors.length === 0}<p class="text-sm text-muted-ink">No colors loaded yet. Ask a staff member.</p>
 						{:else}
 							<div class="flex flex-wrap items-center gap-2">
 								<button type="button" title="Let the lab pick whichever color is most available" onclick={() => { anyColor = true; selected = null; invalidatePreview(); }}
@@ -392,7 +392,7 @@
 					<div class="space-y-3 border-t border-warm-200 pt-3">
 						{#if sliceError}<div class="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{sliceError}</div>{/if}
 
-						{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A teacher approves before it prints.</div>{/if}
+						{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A staff member approves before it prints.</div>{/if}
 						<div class="flex items-center justify-between text-sm"><span class="text-muted-ink">Quota left</span><span class="font-semibold text-ink">{data.usage.gramsRemaining ?? '∞'} g · {data.usage.jobsRemaining ?? '∞'} prints</span></div>
 
 						{#if preview || sliceNote}
@@ -440,7 +440,7 @@
 					</div>
 
 					{#if data.colors.length === 0}
-						<p class="text-sm text-muted-ink">No colors loaded yet. Ask your teacher.</p>
+						<p class="text-sm text-muted-ink">No colors loaded yet. Ask a staff member.</p>
 					{:else if detected.length === 0}
 						<p class="rounded-lg bg-warm-50 px-3 py-2 text-sm text-muted-ink">Choose a sliced file above and we'll detect its colors.</p>
 					{:else}
@@ -491,10 +491,10 @@
 					<p class="mt-2 text-sm text-soft-ink">It's queued and will start when the printer is free.</p>
 				{:else if form.status === 'pending_approval'}
 					<h2 class="text-2xl font-semibold">Sent for approval ✅</h2>
-					<p class="mt-2 text-sm text-soft-ink">A teacher will review it, then it'll be assigned to a printer.</p>
+					<p class="mt-2 text-sm text-soft-ink">A staff member will review it, then it'll be assigned to a printer.</p>
 				{:else}
 					<h2 class="text-2xl font-semibold">Queued ✅</h2>
-					<p class="mt-2 text-sm text-soft-ink">No printer has that exact color loaded right now — it'll go as soon as one does. Ask your teacher if it waits.</p>
+					<p class="mt-2 text-sm text-soft-ink">No printer has that exact color loaded right now — it'll go as soon as one does. Ask a staff member if it waits.</p>
 				{/if}
 				<div class="mt-6 flex justify-center gap-3">
 					<a href="/app/jobs/{form.jobId}" class="btn btn-primary">View print</a>
@@ -538,7 +538,7 @@
 				{#if copies > 1}<span class="text-muted-ink">Copies <span class="font-medium text-ink">{copies}</span></span>{/if}
 			</div>
 
-			{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A teacher approves before it prints.</div>{/if}
+			{#if data.approvalMode}<div class="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm text-[#a35f00]"><Icon name="clock" size={16} /> A staff member approves before it prints.</div>{/if}
 
 			<p class="pt-1 text-center text-base font-semibold text-ink">Print now?</p>
 			<div class="flex gap-2">
