@@ -265,6 +265,15 @@ async function centerStlOnBed(path: string, bed: NonNullable<Awaited<ReturnType<
 			minY = Math.min(minY, y); maxY = Math.max(maxY, y);
 		}
 	}
+	let minZ = Infinity, maxZ = -Infinity;
+	for (let t = 0; t < tris; t++) {
+		const b = 84 + t * 50 + 12;
+		for (let v = 0; v < 3; v++) { const z = buf.readFloatLE(b + v * 12 + 8); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+	}
+	console.log(`[orca] stl tris=${tris} bbox=${(maxX - minX).toFixed(1)}x${(maxY - minY).toFixed(1)}x${(maxZ - minZ).toFixed(1)}mm z=[${minZ.toFixed(1)},${maxZ.toFixed(1)}]`);
+	if (!tris || !Number.isFinite(minX)) {
+		throw new Error('The exported model is empty (no geometry) — try re-adding the model.');
+	}
 	if (maxX - minX > bed.w + 0.5 || maxY - minY > bed.d + 0.5) {
 		throw new Error(`Model is ${Math.ceil(maxX - minX)}×${Math.ceil(maxY - minY)} mm but the bed is only ${bed.w}×${bed.d} mm — scale it down or split it.`);
 	}
@@ -360,7 +369,7 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 			const err = /"error_string"\s*:\s*"([^"]*)"/.exec(resultJson)?.[1] ?? `return_code ${rc}`;
 			// Surface OrcaSlicer's own log (object size, bed bounds, arrange result) so failures are
 			// diagnosable instead of just the one-line error_string.
-			console.error(`[orca] slice failed (rc ${rc}): ${err}\n--- orca args ---\n${args.join(' ')}\n--- orca output (tail) ---\n${out.slice(-2000)}`);
+			console.error(`[orca] slice failed (rc ${rc}): ${err}\n--- orca args ---\n${args.join(' ')}\n--- result.json ---\n${resultJson.slice(0, 1500)}\n--- orca output HEAD ---\n${out.slice(0, 3000)}\n--- orca output TAIL ---\n${out.slice(-2500)}`);
 			throw new Error(`OrcaSlicer failed: ${err}`);
 		}
 	}
