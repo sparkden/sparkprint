@@ -16,13 +16,15 @@
 	// the kiosk screen with no scrolling — as large as it can be while everything stays visible.
 	const DESIGN_W = 1440;
 	let wrap: HTMLDivElement;
+	let boardArea: HTMLDivElement;
 	let scale = $state(1);
 	function fit() {
-		if (!wrap) return;
+		if (!wrap || !boardArea) return;
 		const w = wrap.scrollWidth || DESIGN_W;
 		const h = wrap.scrollHeight;
 		if (!h) return;
-		scale = Math.max(0.25, Math.min(window.innerWidth / w, window.innerHeight / h));
+		// Scale the printer grid to fill the space UNDER the (full-width, unscaled) header.
+		scale = Math.max(0.25, Math.min(boardArea.clientWidth / w, boardArea.clientHeight / h));
 	}
 
 	onMount(() => {
@@ -32,9 +34,10 @@
 		fit();
 		const onResize = () => fit();
 		window.addEventListener('resize', onResize);
-		// Refit whenever the content's natural size changes (a printer starts/finishes, filament edits…).
+		// Refit whenever the content's natural size or the available area changes.
 		const ro = new ResizeObserver(() => fit());
 		if (wrap) ro.observe(wrap);
+		if (boardArea) ro.observe(boardArea);
 		return () => { clearInterval(clock); clearInterval(poll); window.removeEventListener('resize', onResize); ro.disconnect(); };
 	});
 
@@ -149,10 +152,8 @@
 
 <svelte:head><title>Lab Monitor · {data.orgName}</title></svelte:head>
 
-<div class="fixed inset-0 flex items-start justify-center overflow-hidden bg-soft-paper">
-<div style="transform: scale({scale}); transform-origin: top center;">
-<div bind:this={wrap} class="antiburn" style="width: {DESIGN_W}px; padding: 32px;">
-	<!-- Header -->
+<div class="fixed inset-0 flex flex-col overflow-hidden bg-soft-paper px-8 pb-4 pt-6">
+	<!-- Header (full width, unscaled → clock stays in the top corner) -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="flex items-center gap-4">
 			<img src="/immaculata-seal.png" alt="" class="h-16 w-16 shrink-0 object-contain sm:h-20 sm:w-20" />
@@ -190,7 +191,10 @@
 		</div>
 	</header>
 
-	<!-- Printer board -->
+	<!-- Printer board — scaled to fill the space below the header, no scrolling -->
+	<div bind:this={boardArea} class="flex min-h-0 flex-1 items-start justify-center overflow-hidden">
+	<div style="transform: scale({scale}); transform-origin: top center;">
+	<div bind:this={wrap} class="antiburn" style="width: {DESIGN_W}px;">
 	<div class="grid gap-5" style="grid-template-columns: repeat({cols}, minmax(0, 1fr));">
 		{#each printers as p}
 			{@const color = (p.colorRequest ?? [])[0]?.colorHex}
@@ -375,8 +379,9 @@
 	{#if printers.length === 0}
 		<div class="card p-12 text-center text-xl text-muted-ink">No printers yet. Add them in Admin → Printers.</div>
 	{/if}
-</div>
-</div>
+	</div>
+	</div>
+	</div>
 </div>
 
 <!-- Filament editor (kept outside .antiburn so the burn-in transform can't offset the fixed modal) -->
