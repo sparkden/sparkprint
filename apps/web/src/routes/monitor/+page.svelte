@@ -149,8 +149,8 @@
 
 <svelte:head><title>Lab Monitor · {data.orgName}</title></svelte:head>
 
-<div class="fixed inset-0 flex items-center justify-center overflow-hidden bg-soft-paper">
-<div style="transform: scale({scale}); transform-origin: center center;">
+<div class="fixed inset-0 flex items-start justify-center overflow-hidden bg-soft-paper">
+<div style="transform: scale({scale}); transform-origin: top center;">
 <div bind:this={wrap} class="antiburn" style="width: {DESIGN_W}px; padding: 32px;">
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
