@@ -12,6 +12,30 @@
 	let modalOpen = $state(false);
 	let viewOpen = $state(false); // 3D model viewer overlay
 
+	// ── Exit kiosk mode (PIN-gated) ────────────────────────────────────────────
+	let exitOpen = $state(false);
+	let exitPin = $state('');
+	let exitErr = $state('');
+	let exitBusy = $state(false);
+	let exited = $state(false);
+	async function doExit() {
+		exitBusy = true; exitErr = '';
+		try {
+			const res = await fetch('/monitor/exit', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ pin: exitPin, kiosk: data.kioskToken })
+			});
+			if (res.ok) { exited = true; exitOpen = false; }
+			else if (res.status === 401) exitErr = 'Wrong PIN — try again.';
+			else exitErr = 'Could not exit kiosk mode. Ask an admin.';
+		} catch {
+			exitErr = 'Could not reach the server.';
+		} finally {
+			exitBusy = false; exitPin = '';
+		}
+	}
+
 	// Fit-to-screen: the board is laid out at a fixed design width then scaled so the WHOLE thing fills
 	// the kiosk screen with no scrolling — as large as it can be while everything stays visible.
 	const DESIGN_W = 1440;
@@ -30,7 +54,7 @@
 	onMount(() => {
 		const clock = setInterval(() => (now = new Date()), 1000);
 		// Live board — but never yank the data out from under an open editor / 3D view.
-		const poll = setInterval(() => { if (!modalOpen && !viewOpen) invalidateAll(); }, 5000);
+		const poll = setInterval(() => { if (!modalOpen && !viewOpen && !exitOpen) invalidateAll(); }, 5000);
 		fit();
 		const onResize = () => fit();
 		window.addEventListener('resize', onResize);
@@ -444,6 +468,36 @@
 			</div>
 		</form>
 	</Modal>
+{/if}
+
+<!-- Small, unobtrusive exit-kiosk button (PIN-gated). Re-enable from Admin → Kiosk. -->
+<button type="button" onclick={() => { exitOpen = true; exitErr = ''; exitPin = ''; }}
+	class="fixed bottom-1.5 right-2 z-[65] rounded-md bg-ink/25 px-2 py-0.5 text-[11px] font-medium text-white/60 opacity-40 backdrop-blur transition hover:opacity-100">Exit kiosk</button>
+
+{#if exitOpen}
+	<div class="fixed inset-0 z-[80] flex items-center justify-center bg-ink/70 p-4">
+		<div class="card w-full max-w-xs p-6 text-center">
+			<p class="text-lg font-semibold text-ink">Exit kiosk mode</p>
+			<p class="mt-1 text-sm text-muted-ink">Enter the PIN. To turn the kiosk back on, an admin re-enables it from Admin → Kiosk.</p>
+			<!-- svelte-ignore a11y_autofocus -->
+			<input type="password" inputmode="numeric" autocomplete="off" autofocus bind:value={exitPin} placeholder="PIN"
+				class="input mt-4 text-center text-2xl tracking-[0.4em]" onkeydown={(e) => { if (e.key === 'Enter') doExit(); }} />
+			{#if exitErr}<p class="mt-2 text-sm font-medium text-danger">{exitErr}</p>{/if}
+			<div class="mt-5 flex gap-2">
+				<button type="button" class="btn btn-secondary flex-1" onclick={() => (exitOpen = false)}>Cancel</button>
+				<button type="button" class="btn btn-primary flex-1" disabled={exitBusy || !exitPin} onclick={doExit}>{exitBusy ? 'Exiting…' : 'Exit'}</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if exited}
+	<div class="fixed inset-0 z-[90] flex items-center justify-center bg-ink text-center">
+		<div>
+			<p class="text-2xl font-bold text-white">Exiting kiosk mode…</p>
+			<p class="mt-2 text-base text-white/60">The display will return to the terminal in a moment.</p>
+		</div>
+	</div>
 {/if}
 
 <!-- 3D model viewer — tap a print image on the board to open it -->
