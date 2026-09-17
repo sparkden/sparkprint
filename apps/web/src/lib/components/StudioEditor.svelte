@@ -236,10 +236,6 @@
 			const g = m.geometry.clone();
 			g.applyMatrix4(m.matrixWorld);
 			g.rotateX(Math.PI / 2); // Y-up display → Z-up for slicing
-			// The editor centers models around (0,0); the slicer's plate origin is a CORNER. Shift to the
-			// plate centre so the model lands fully inside the bed without relying on the slicer's arrange
-			// (which was leaving models at the corner → "no object fully inside" slice failures).
-			g.translate(plate.x / 2, plate.y / 2, 0);
 			group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial()));
 		}
 		group.updateMatrixWorld(true);
@@ -647,7 +643,6 @@
 			const g = m.geometry.clone();
 			g.applyMatrix4(m.matrixWorld);
 			g.rotateX(Math.PI / 2); // Y-up display → Z-up for slicing
-			g.translate(plate.x / 2, plate.y / 2, 0); // centre on the slicer's corner-origin plate (see exportSTL)
 			const ng = g.index ? g.toNonIndexed() : g;
 			const pos = ng.getAttribute('position').array as Float32Array;
 			const nTri = pos.length / 9;

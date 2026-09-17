@@ -276,6 +276,9 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		const rc = Number(/"return_code"\s*:\s*(-?\d+)/.exec(resultJson)?.[1] ?? 0);
 		if (rc !== 0) {
 			const err = /"error_string"\s*:\s*"([^"]*)"/.exec(resultJson)?.[1] ?? `return_code ${rc}`;
+			// Surface OrcaSlicer's own log (object size, bed bounds, arrange result) so failures are
+			// diagnosable instead of just the one-line error_string.
+			console.error(`[orca] slice failed (rc ${rc}): ${err}\n--- orca args ---\n${args.join(' ')}\n--- orca output (tail) ---\n${out.slice(-2000)}`);
 			throw new Error(`OrcaSlicer failed: ${err}`);
 		}
 	}
