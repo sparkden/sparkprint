@@ -62,6 +62,20 @@ const FAMILY: Record<string, string> = {
 };
 const ALL_MACHINES = Object.values(MACHINE);
 
+// Real Bambu build-plate sizes (mm). The bed is corner-origin (0,0)→(w,d); centre is (w/2, d/2).
+// Used to place models deterministically (see centerStlOnBed) — more reliable than parsing the
+// machine profile, which inherits printable_area from a parent and so doesn't declare it directly.
+const BED: Record<string, { w: number; d: number }> = {
+	X1C: { w: 256, d: 256 },
+	X1: { w: 256, d: 256 },
+	X1E: { w: 256, d: 256 },
+	P1S: { w: 256, d: 256 },
+	P1P: { w: 256, d: 256 },
+	A1: { w: 256, d: 256 },
+	A1M: { w: 180, d: 180 },
+	H2D: { w: 350, d: 320 }
+};
+
 let cached: { apprun: string; profiles: string; xvfb: boolean } | null | undefined;
 
 async function exists(p: string) {
@@ -305,13 +319,17 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	// bed. This removes the dependency on OrcaSlicer's --arrange (which was leaving models at the
 	// corner-origin → "no object fully inside"). If we can't read the bed or it isn't a binary STL
 	// (e.g. a painted 3MF), we fall back to --arrange.
-	const bed = await readBed(machinePath);
+	const bd = BED[model];
+	const bed = bd
+		? { minX: 0, minY: 0, maxX: bd.w, maxY: bd.d, cx: bd.w / 2, cy: bd.d / 2, w: bd.w, d: bd.d }
+		: await readBed(machinePath);
 	let sliceModel = modelPath;
 	let useArrange = true;
 	if (bed) {
 		const centered = await centerStlOnBed(modelPath, bed, outDir); // throws if the model exceeds the bed
 		if (centered) { sliceModel = centered; useArrange = false; }
 	}
+	console.log(`[orca] model=${model} bed=${bed ? `${bed.w}x${bed.d}@(${bed.cx},${bed.cy})` : 'unknown'} centered=${!useArrange} file=${sliceModel.split('/').pop()}`);
 
 	// --export-3mf produces a proper Bambu printable 3mf (Metadata/plate_1.gcode + md5 + plate
 	// config) — that's what Bambu's cloud accepts. Its path is resolved relative to --outputdir,
