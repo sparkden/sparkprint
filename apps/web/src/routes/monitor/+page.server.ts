@@ -72,6 +72,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			ownerName: users.name,
 			modelId: printJobs.modelId,
 			modelName: models.name,
+			modelFormat: models.format,
 			hasThumb: models.thumbnailKey,
 			colorRequest: printJobs.colorRequest
 		})

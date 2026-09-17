@@ -4,17 +4,43 @@
 	import { enhance } from '$app/forms';
 	import Icon from '$lib/components/Icon.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import ModelViewer from '$lib/components/ModelViewer.svelte';
 	import { COLOR_LIBRARY } from '$lib/colors';
 	let { data, form } = $props();
 
 	let now = $state(new Date());
 	let modalOpen = $state(false);
+	let viewOpen = $state(false); // 3D model viewer overlay
 	onMount(() => {
 		const clock = setInterval(() => (now = new Date()), 1000);
-		// Live board — but never yank the data out from under an open editor.
-		const poll = setInterval(() => { if (!modalOpen) invalidateAll(); }, 5000);
+		// Live board — but never yank the data out from under an open editor / 3D view.
+		const poll = setInterval(() => { if (!modalOpen && !viewOpen) invalidateAll(); }, 5000);
 		return () => { clearInterval(clock); clearInterval(poll); };
 	});
+
+	// ── 3D model viewer (tap the print image on the board) ─────────────────────
+	let viewFile = $state<File | null>(null);
+	let viewName = $state('');
+	let viewColor = $state('#1E2F66');
+	let viewLoading = $state(false);
+	async function open3d(p: (typeof printers)[number]) {
+		if (!p.modelId) return;
+		viewName = p.modelName ?? p.jobName ?? 'Print';
+		viewColor = (p.colorRequest ?? [])[0]?.colorHex ?? '#1E2F66';
+		viewFile = null;
+		viewOpen = true;
+		viewLoading = true;
+		try {
+			const res = await fetch(`/files/${p.modelId}/model${data.kiosk ? `?kiosk=${data.kioskToken}` : ''}`);
+			if (!res.ok) throw new Error('load failed');
+			const fmt = res.headers.get('x-model-format') ?? p.modelFormat ?? 'stl';
+			viewFile = new File([await res.blob()], `model.${fmt}`);
+		} catch {
+			viewFile = null;
+		} finally {
+			viewLoading = false;
+		}
+	}
 
 	const printers = $derived(data.printers);
 
@@ -95,163 +121,180 @@
 <div class="antiburn min-h-screen bg-soft-paper px-5 py-5 sm:px-8">
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
-		<div class="flex items-center gap-3.5">
-			<img src="/immaculata-seal.png" alt="" class="h-12 w-12 shrink-0 object-contain" />
+		<div class="flex items-center gap-4">
+			<img src="/immaculata-seal.png" alt="" class="h-16 w-16 shrink-0 object-contain sm:h-20 sm:w-20" />
 			<div>
-				<p class="text-2xl font-bold leading-none tracking-tight text-ink" style="font-family: var(--font-display)">{data.orgName}</p>
-				<p class="mt-1 text-xs text-muted-ink">Live lab monitor</p>
+				<p class="text-4xl font-bold leading-none tracking-tight text-ink sm:text-5xl" style="font-family: var(--font-display)">{data.orgName}</p>
+				<p class="mt-1.5 text-base font-medium text-muted-ink sm:text-lg">Live lab monitor</p>
 			</div>
 		</div>
-		<div class="flex items-center gap-3 text-sm font-semibold">
+		<div class="flex items-center gap-3 text-base font-semibold">
 			<!-- Scan to open the app on a phone -->
-			<div class="hidden items-center gap-2 rounded-xl border border-warm-200 bg-surface px-2.5 py-1.5 shadow-xs lg:flex">
-				<div class="h-14 w-14 shrink-0 [&>svg]:block [&>svg]:h-full [&>svg]:w-full">{@html data.appQr}</div>
+			<div class="hidden items-center gap-3 rounded-2xl border border-warm-200 bg-surface px-3.5 py-2.5 shadow-xs lg:flex">
+				<div class="h-20 w-20 shrink-0 [&>svg]:block [&>svg]:h-full [&>svg]:w-full">{@html data.appQr}</div>
 				<div class="leading-tight">
-					<div class="text-xs font-bold text-ink">Scan to print</div>
-					<div class="text-[10px] font-medium text-muted-ink">{appHost}</div>
+					<div class="text-base font-bold text-ink">Scan to print</div>
+					<div class="text-xs font-medium text-muted-ink">{appHost}</div>
 				</div>
 			</div>
-			<span class="badge badge-success">{free} free</span>
-			<span class="badge badge-spark">{printing} printing</span>
-			{#if ready > 0}<span class="badge badge-warning">{ready} to pick up</span>{/if}
-			{#if data.weather}
-				<span class="hidden items-center gap-1.5 rounded-full border border-warm-200 bg-surface px-3 py-1 md:inline-flex" title="{data.weather.label} · {data.weather.city}">
-					<span class="text-base leading-none">{data.weather.icon}</span>
-					<span class="tabular-nums">{data.weather.tempF}°</span>
-					<span class="font-normal text-muted-ink">{data.weather.city}</span>
-				</span>
-			{/if}
+			<div class="flex flex-col items-end gap-1.5">
+				<div class="flex items-center gap-2">
+					<span class="badge badge-success !px-3.5 !py-1.5 !text-base">{free} free</span>
+					<span class="badge badge-spark !px-3.5 !py-1.5 !text-base">{printing} printing</span>
+					{#if ready > 0}<span class="badge badge-warning !px-3.5 !py-1.5 !text-base">{ready} to pick up</span>{/if}
+					{#if data.weather}
+						<span class="hidden items-center gap-1.5 rounded-full border border-warm-200 bg-surface px-3.5 py-1.5 text-base md:inline-flex" title="{data.weather.label} · {data.weather.city}">
+							<span class="text-xl leading-none">{data.weather.icon}</span>
+							<span class="tabular-nums">{data.weather.tempF}°</span>
+						</span>
+					{/if}
+				</div>
+			</div>
 			<div class="text-right leading-none">
-				<div class="tabular-nums text-2xl font-bold text-ink">{time} <span class="text-sm font-semibold text-muted-ink">ET</span></div>
-				<div class="text-xs font-normal text-muted-ink">{date}</div>
+				<div class="tabular-nums text-4xl font-bold text-ink sm:text-5xl">{time} <span class="text-xl font-semibold text-muted-ink">ET</span></div>
+				<div class="mt-1 text-base font-medium text-muted-ink">{date}</div>
 			</div>
 		</div>
 	</header>
 
 	<!-- Printer board -->
-	<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+	<div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
 		{#each printers as p}
 			{@const color = (p.colorRequest ?? [])[0]?.colorHex}
 			{@const img = thumb(p.modelId, p.hasThumb)}
-			<div class="card p-5 {p.status === 'finished' ? 'ring-2 ring-warning/50' : ''} {!p.online || !p.enabled ? 'opacity-55' : ''}">
-				<div class="flex items-start justify-between">
+			<div class="card p-6 {p.status === 'finished' ? 'ring-2 ring-warning/50' : ''} {!p.online || !p.enabled ? 'opacity-55' : ''}">
+				<div class="flex items-start justify-between gap-2">
 					<div>
-						<p class="text-lg font-bold text-ink">{p.name}</p>
-						<p class="text-xs text-muted-ink">{p.model}</p>
+						<p class="text-2xl font-bold text-ink">{p.name}</p>
+						<p class="text-base text-muted-ink">{p.model}</p>
 					</div>
-					{#if sendingOn(p)}<span class="badge badge-spark">Starting…</span>
-					{:else if p.status === 'idle' && p.online}<span class="badge badge-success">Free</span>
-					{:else if p.status === 'printing'}<span class="badge badge-spark">Printing</span>
-					{:else if p.status === 'finished'}<span class="badge badge-warning">Ready</span>
-					{:else if !p.online}<span class="badge badge-neutral">Offline</span>
-					{:else}<span class="badge badge-neutral capitalize">{p.status}</span>{/if}
+					{#if sendingOn(p)}<span class="badge badge-spark !px-3.5 !py-1.5 !text-base">Starting…</span>
+					{:else if p.status === 'idle' && p.online}<span class="badge badge-success !px-3.5 !py-1.5 !text-base">Free</span>
+					{:else if p.status === 'printing'}<span class="badge badge-spark !px-3.5 !py-1.5 !text-base">Printing</span>
+					{:else if p.status === 'finished'}<span class="badge badge-warning !px-3.5 !py-1.5 !text-base">Ready</span>
+					{:else if !p.online}<span class="badge badge-neutral !px-3.5 !py-1.5 !text-base">Offline</span>
+					{:else}<span class="badge badge-neutral !px-3.5 !py-1.5 !text-base capitalize">{p.status}</span>{/if}
 				</div>
 
 				{#if p.status === 'printing'}
-					<div class="mt-4 flex gap-3">
-						{#if img}<img src={img} alt="" class="h-16 w-16 shrink-0 rounded-lg border border-warm-200 bg-[#2b2b2b] object-cover" />{/if}
+					<div class="mt-5 flex gap-4">
+						{#if p.modelId}
+							<button type="button" onclick={() => open3d(p)} title="Tap for a 3D view"
+								class="group relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-warm-200 bg-[#2b2b2b] ring-spark transition hover:ring-2">
+								{#if img}<img src={img} alt="" class="h-full w-full object-cover" />{/if}
+								<span class="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 bg-ink/60 py-1 text-xs font-semibold text-white"><Icon name="box" size={14} /> 3D</span>
+							</button>
+						{:else if img}
+							<img src={img} alt="" class="h-28 w-28 shrink-0 rounded-xl border border-warm-200 bg-[#2b2b2b] object-cover" />
+						{/if}
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
-								{#if color}<span class="h-4 w-4 shrink-0 rounded-full border border-warm-300" style="background:{color}"></span>{/if}
-								<p class="truncate text-sm font-semibold text-ink">{p.modelName ?? p.jobName ?? 'Print'}</p>
+								{#if color}<span class="h-6 w-6 shrink-0 rounded-full border border-warm-300" style="background:{color}"></span>{/if}
+								<p class="truncate text-xl font-bold text-ink">{p.modelName ?? p.jobName ?? 'Print'}</p>
 							</div>
-							<p class="mt-0.5 truncate text-xs text-muted-ink">{p.ownerName ?? '—'}</p>
-							<div class="mt-2 h-2 overflow-hidden rounded-full bg-warm-100">
+							<p class="mt-1 truncate text-lg text-muted-ink">{p.ownerName ?? '—'}</p>
+							<div class="mt-3 h-4 overflow-hidden rounded-full bg-warm-100">
 								<div class="h-full rounded-full bg-spark transition-all" style="width:{p.progressPct ?? 0}%"></div>
 							</div>
-							<div class="mt-1 flex justify-between text-xs text-muted-ink">
-								<span class="font-semibold text-spark-deep">{p.progressPct ?? 0}%</span>
-								<span>{remaining(p.remainingTimeMin)}</span>
+							<div class="mt-1.5 flex items-baseline justify-between">
+								<span class="text-2xl font-bold text-spark-deep">{p.progressPct ?? 0}%</span>
+								<span class="text-lg font-medium text-muted-ink">{remaining(p.remainingTimeMin)}</span>
 							</div>
 						</div>
 					</div>
 					<!-- Live print-speed control -->
-					<div class="mt-3">
-						<div class="mb-1 flex items-center justify-between">
-							<span class="text-[11px] font-semibold uppercase tracking-wide text-muted-ink">Speed</span>
-						</div>
-						<form method="POST" action="?/setSpeed" use:enhance class="grid grid-cols-4 gap-1">
+					<div class="mt-4">
+						<span class="text-sm font-semibold uppercase tracking-wide text-muted-ink">Speed</span>
+						<form method="POST" action="?/setSpeed" use:enhance class="mt-1.5 grid grid-cols-4 gap-1.5">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							{#each SPEED as s}
 								<button name="level" value={s.v} title={s.label}
-									class="rounded-md border px-1 py-1 text-[11px] font-semibold transition-colors {(p.jobSpeed ?? 2) === s.v ? 'border-spark bg-spark text-white' : 'border-warm-200 bg-surface text-soft-ink hover:bg-warm-50'}"
+									class="rounded-lg border px-1 py-2 text-sm font-semibold transition-colors {(p.jobSpeed ?? 2) === s.v ? 'border-spark bg-spark text-white' : 'border-warm-200 bg-surface text-soft-ink hover:bg-warm-50'}"
 								>{s.label}</button>
 							{/each}
 						</form>
 					</div>
 
-					<div class="mt-3 flex gap-2">
+					<div class="mt-4 flex gap-3">
 						<form method="POST" action="?/complete" use:enhance class="flex-1">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-							<button class="btn btn-secondary btn-sm w-full"><Icon name="check" size={14} /> Done</button>
+							<button class="btn btn-secondary btn-lg w-full"><Icon name="check" size={20} /> Done</button>
 						</form>
 						<form method="POST" action="?/stop" use:enhance onsubmit={(e) => { if (!confirm('Stop this print on the printer?')) e.preventDefault(); }}>
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-							<button class="btn btn-ghost btn-sm text-danger"><Icon name="x" size={14} /> Stop</button>
+							<button class="btn btn-ghost btn-lg text-danger"><Icon name="x" size={20} /> Stop</button>
 						</form>
 					</div>
 				{:else if p.status === 'finished'}
-					<div class="mt-4 flex gap-3">
-						{#if img}<img src={img} alt="" class="h-16 w-16 shrink-0 rounded-lg border border-warm-200 bg-[#2b2b2b] object-cover" />{/if}
-						<div class="min-w-0 flex-1">
-							<p class="truncate text-sm font-semibold text-ink">{p.modelName ?? p.jobName ?? 'Print'}</p>
-							<p class="mt-0.5 truncate text-xs text-muted-ink">{p.ownerName ?? '—'} · done</p>
+					<div class="mt-5 flex gap-4">
+						{#if p.modelId}
+							<button type="button" onclick={() => open3d(p)} title="Tap for a 3D view"
+								class="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-warm-200 bg-[#2b2b2b] ring-spark transition hover:ring-2">
+								{#if img}<img src={img} alt="" class="h-full w-full object-cover" />{/if}
+								<span class="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 bg-ink/60 py-1 text-xs font-semibold text-white"><Icon name="box" size={14} /> 3D</span>
+							</button>
+						{:else if img}
+							<img src={img} alt="" class="h-28 w-28 shrink-0 rounded-xl border border-warm-200 bg-[#2b2b2b] object-cover" />
+						{/if}
+						<div class="min-w-0 flex-1 self-center">
+							<p class="truncate text-xl font-bold text-ink">{p.modelName ?? p.jobName ?? 'Print'}</p>
+							<p class="mt-1 truncate text-lg text-muted-ink">{p.ownerName ?? '—'} · done</p>
 						</div>
 					</div>
-					<form method="POST" action="?/checkout" use:enhance class="mt-3">
+					<form method="POST" action="?/checkout" use:enhance class="mt-4">
 						<input type="hidden" name="jobId" value={p.jobId} />
 						{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-						<button class="btn btn-primary w-full"><Icon name="check" size={16} /> Picked up — check out</button>
+						<button class="btn btn-primary btn-lg w-full !text-lg"><Icon name="check" size={22} /> Picked up — check out</button>
 					</form>
 				{:else if sendingOn(p)}
-					<div class="mt-6 text-center">
-						<p class="text-lg font-bold text-spark-deep">Starting…</p>
-						<p class="mt-1 text-xs text-muted-ink truncate">{p.modelName ?? p.jobName ?? 'Sending file to the printer'}</p>
-						<form method="POST" action="?/stop" use:enhance class="mt-3">
+					<div class="mt-8 text-center">
+						<p class="text-3xl font-bold text-spark-deep">Starting…</p>
+						<p class="mt-2 truncate text-lg text-muted-ink">{p.modelName ?? p.jobName ?? 'Sending file to the printer'}</p>
+						<form method="POST" action="?/stop" use:enhance class="mt-4">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-							<button class="btn btn-ghost btn-sm text-danger">Cancel</button>
+							<button class="btn btn-ghost btn-lg text-danger">Cancel</button>
 						</form>
 					</div>
 				{:else if p.status === 'idle' && p.online}
-					<p class="mt-6 text-center text-2xl font-bold text-success">Available</p>
+					<p class="mt-8 mb-2 text-center text-4xl font-bold text-success">Available</p>
 				{:else}
-					<div class="mt-6 text-center">
-						<p class="text-sm font-medium {p.status === 'error' ? 'text-danger' : 'text-muted-ink'}">{p.status === 'error' ? 'Printer error' : p.online ? 'Not available' : 'Offline'}</p>
-						<form method="POST" action="?/recheck" use:enhance class="mt-2">
+					<div class="mt-8 text-center">
+						<p class="text-xl font-semibold {p.status === 'error' ? 'text-danger' : 'text-muted-ink'}">{p.status === 'error' ? 'Printer error' : p.online ? 'Not available' : 'Offline'}</p>
+						<form method="POST" action="?/recheck" use:enhance class="mt-3">
 							<input type="hidden" name="printerId" value={p.id} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-							<button class="btn btn-secondary btn-sm"><Icon name="refresh" size={14} /> Recheck status</button>
+							<button class="btn btn-secondary btn-lg"><Icon name="refresh" size={18} /> Recheck status</button>
 						</form>
 					</div>
 				{/if}
 
 				<!-- Filament loaded in this printer — tap a swatch to edit, or unload. -->
-				<div class="mt-4 border-t border-warm-200 pt-3">
-					<div class="mb-2 flex items-center justify-between">
-						<span class="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-ink">
-							<Icon name="spool" size={13} /> Filament
+				<div class="mt-5 border-t border-warm-200 pt-4">
+					<div class="mb-2.5 flex items-center justify-between">
+						<span class="inline-flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-ink">
+							<Icon name="spool" size={16} /> Filament
 						</span>
 						{#if canUnload(p)}
 							<form method="POST" action="?/unloadFilament" use:enhance onsubmit={(e) => { if (!confirm(`Unload the loaded filament on ${p.name}?`)) e.preventDefault(); }}>
 								<input type="hidden" name="printerId" value={p.id} />
 								{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
-								<button class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-soft-ink transition-colors hover:bg-warm-100"><Icon name="refresh" size={12} /> Unload</button>
+								<button class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold text-soft-ink transition-colors hover:bg-warm-100"><Icon name="refresh" size={15} /> Unload</button>
 							</form>
 						{/if}
 					</div>
-					<div class="flex flex-wrap gap-1.5">
+					<div class="flex flex-wrap gap-2">
 						{#each p.ams as s}
 							<button type="button" onclick={() => openSlot(p, s)} title="Edit {slotLabel(p, s)}"
-								class="inline-flex items-center gap-1.5 rounded-full border border-warm-200 bg-surface py-1 pl-1 pr-2.5 text-xs shadow-xs transition-colors hover:border-spark hover:bg-warm-50">
+								class="inline-flex items-center gap-2 rounded-full border border-warm-200 bg-surface py-1.5 pl-1.5 pr-3.5 text-base shadow-xs transition-colors hover:border-spark hover:bg-warm-50">
 								{#if s.empty}
-									<span class="h-4 w-4 rounded-full border border-dashed border-warm-400"></span>
+									<span class="h-5 w-5 rounded-full border border-dashed border-warm-400"></span>
 									<span class="text-muted-ink">Empty</span>
 								{:else}
-									<span class="h-4 w-4 rounded-full ring-1 ring-black/10" style="background:{s.colorHex ?? '#ccc'}"></span>
+									<span class="h-5 w-5 rounded-full ring-1 ring-black/10" style="background:{s.colorHex ?? '#ccc'}"></span>
 									<span class="font-medium text-ink">{s.colorName || s.filamentType || 'Filament'}</span>
 								{/if}
 							</button>
@@ -259,21 +302,21 @@
 						{#if p.external}
 							{@const ext = p.external}
 							<button type="button" onclick={() => openSlot(p, ext, true)} title="Edit external spool"
-								class="inline-flex items-center gap-1.5 rounded-full border border-warm-200 bg-surface py-1 pl-1 pr-2.5 text-xs shadow-xs transition-colors hover:border-spark hover:bg-warm-50">
+								class="inline-flex items-center gap-2 rounded-full border border-warm-200 bg-surface py-1.5 pl-1.5 pr-3.5 text-base shadow-xs transition-colors hover:border-spark hover:bg-warm-50">
 								{#if ext.empty}
-									<span class="h-4 w-4 rounded-full border border-dashed border-warm-400"></span>
+									<span class="h-5 w-5 rounded-full border border-dashed border-warm-400"></span>
 									<span class="text-muted-ink">Ext · empty</span>
 								{:else}
-									<span class="h-4 w-4 rounded-full ring-1 ring-black/10" style="background:{ext.colorHex ?? '#ccc'}"></span>
+									<span class="h-5 w-5 rounded-full ring-1 ring-black/10" style="background:{ext.colorHex ?? '#ccc'}"></span>
 									<span class="font-medium text-ink">{ext.colorName || ext.filamentType || 'Ext'}</span>
-									<span class="rounded bg-warm-100 px-1 text-[10px] font-semibold text-muted-ink">EXT</span>
+									<span class="rounded bg-warm-100 px-1.5 text-xs font-semibold text-muted-ink">EXT</span>
 								{/if}
 							</button>
 						{/if}
 						{#if p.ams.length === 0 && !p.external}
 							<button type="button" onclick={() => openNewExternal(p)}
-								class="inline-flex items-center gap-1 rounded-full border border-dashed border-warm-300 px-2.5 py-1 text-xs font-medium text-muted-ink transition-colors hover:border-spark hover:text-spark">
-								<Icon name="plus" size={12} /> Set spool color
+								class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-warm-300 px-3.5 py-1.5 text-base font-medium text-muted-ink transition-colors hover:border-spark hover:text-spark">
+								<Icon name="plus" size={16} /> Set spool color
 							</button>
 						{/if}
 					</div>
@@ -284,12 +327,12 @@
 
 	<!-- Queue -->
 	{#if data.queue.length}
-		<div class="mt-8">
-			<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-ink">Up next · {data.queue.length} waiting</p>
-			<div class="flex flex-wrap gap-2">
+		<div class="mt-10">
+			<p class="mb-3 text-base font-semibold uppercase tracking-wide text-muted-ink">Up next · {data.queue.length} waiting</p>
+			<div class="flex flex-wrap gap-2.5">
 				{#each data.queue as q}
-					<span class="inline-flex items-center gap-2 rounded-full border border-warm-200 bg-surface px-3 py-1.5 text-sm shadow-xs">
-						<span class="font-medium text-ink">{q.name}</span><span class="text-muted-ink">· {q.ownerName}</span>
+					<span class="inline-flex items-center gap-2 rounded-full border border-warm-200 bg-surface px-4 py-2 text-lg shadow-xs">
+						<span class="font-semibold text-ink">{q.name}</span><span class="text-muted-ink">· {q.ownerName}</span>
 					</span>
 				{/each}
 			</div>
@@ -297,7 +340,7 @@
 	{/if}
 
 	{#if printers.length === 0}
-		<div class="card p-12 text-center text-muted-ink">No printers yet. Add them in Admin → Printers.</div>
+		<div class="card p-12 text-center text-xl text-muted-ink">No printers yet. Add them in Admin → Printers.</div>
 	{/if}
 </div>
 
@@ -361,6 +404,27 @@
 			</div>
 		</form>
 	</Modal>
+{/if}
+
+<!-- 3D model viewer — tap a print image on the board to open it -->
+{#if viewOpen}
+	<div class="fixed inset-0 z-[70] flex flex-col bg-ink/90 p-4 backdrop-blur-sm sm:p-8">
+		<div class="mb-4 flex items-center justify-between gap-4">
+			<div class="min-w-0">
+				<p class="truncate text-3xl font-bold text-white">{viewName}</p>
+				<p class="text-base text-white/60">Drag to rotate · scroll or pinch to zoom</p>
+			</div>
+			<button type="button" onclick={() => (viewOpen = false)} class="btn btn-secondary btn-lg !text-lg"><Icon name="x" size={22} /> Close</button>
+		</div>
+		<div class="relative min-h-0 flex-1 overflow-hidden rounded-2xl">
+			{#if viewLoading}<div class="absolute inset-0 z-10 flex items-center justify-center text-xl font-medium text-white/70">Loading 3D model…</div>{/if}
+			{#if viewFile}
+				<ModelViewer file={viewFile} colorHex={viewColor} />
+			{:else if !viewLoading}
+				<div class="flex h-full items-center justify-center text-lg text-white/60">Couldn't load the 3D model.</div>
+			{/if}
+		</div>
+	</div>
 {/if}
 
 <!-- Screensaver: a soft dark blob drifts across the screen (+ a tiny whole-board pixel shift) so no
