@@ -365,8 +365,6 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	const args = [
 		'-a',
 		loc.apprun,
-		'--debug',
-		'2', // verbose OrcaSlicer logging so failures explain themselves in the captured output
 		'--load-settings',
 		`${machineLoad};${overridePath}`,
 		'--load-filaments',

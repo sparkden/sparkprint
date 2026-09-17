@@ -63,8 +63,13 @@ async function ftpsCheck(ip: string, accessCode: string, remoteName: string, exp
 export async function ftpsUpload(ip: string, accessCode: string, data: Buffer, remoteName: string): Promise<void> {
 	let lastErr: unknown;
 	let lastCheck: 'ok' | 'missing' | 'unknown' = 'unknown';
+	// Scale the socket timeout to the file size — a big flat part slices to a large .gcode.3mf and a
+	// fixed 30s timeout would abort the transfer mid-upload, leaving a partial file that then looks
+	// like "no/failed storage". Floor 2 min; allow ~150 KB/s worst case over WiFi.
+	const timeoutMs = Math.min(900000, Math.max(120000, Math.ceil(data.length / 150)));
+	console.log(`[lan] ftps upload ${remoteName} ${(data.length / 1e6).toFixed(1)}MB timeout=${Math.round(timeoutMs / 1000)}s`);
 	for (let attempt = 1; attempt <= 3; attempt++) {
-		const client = new FtpClient(30000);
+		const client = new FtpClient(timeoutMs);
 		try {
 			await ftpAccess(client, ip, accessCode);
 			await client.remove(remoteName).catch(() => {}); // clear a stale/locked leftover first
