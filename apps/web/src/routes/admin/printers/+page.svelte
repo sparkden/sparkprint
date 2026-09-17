@@ -9,6 +9,12 @@
 	let { data, form } = $props();
 
 	let addOpen = $state(false);
+	let renamingId = $state<string | null>(null);
+	let renameValue = $state('');
+	function startRename(id: string, name: string) {
+		renamingId = id;
+		renameValue = name;
+	}
 </script>
 
 <svelte:head><title>Printers · LataPrint Admin</title></svelte:head>
@@ -47,7 +53,20 @@
 						<div class="flex items-center gap-3">
 							<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-spark-soft text-spark-deep"><Icon name="printer" size={20} /></div>
 							<div>
-								<p class="font-semibold text-ink">{p.name}</p>
+								{#if renamingId === p.id}
+									<form method="POST" action="?/rename" use:enhance={() => async ({ update, result }) => { await update(); if (result.type === 'success') renamingId = null; }} class="flex items-center gap-1">
+										<input type="hidden" name="id" value={p.id} />
+										<!-- svelte-ignore a11y_autofocus -->
+										<input name="name" bind:value={renameValue} maxlength="60" required autofocus class="input h-8 w-44 px-2 py-1 text-sm" onkeydown={(e) => { if (e.key === 'Escape') renamingId = null; }} />
+										<button class="btn btn-primary btn-sm" title="Save name"><Icon name="check" size={14} /></button>
+										<button type="button" class="btn btn-ghost btn-sm" title="Cancel" onclick={() => (renamingId = null)}><Icon name="x" size={14} /></button>
+									</form>
+								{:else}
+									<div class="flex items-center gap-1.5">
+										<p class="font-semibold text-ink">{p.name}</p>
+										<button type="button" title="Rename printer" class="rounded p-0.5 text-muted-ink transition-colors hover:bg-warm-100 hover:text-ink" onclick={() => startRename(p.id, p.name)}><Icon name="settings" size={13} /></button>
+									</div>
+								{/if}
 								<p class="text-xs text-muted-ink">{p.model}{p.location ? ` · ${p.location}` : ''}</p>
 							</div>
 						</div>

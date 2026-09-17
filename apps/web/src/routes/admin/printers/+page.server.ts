@@ -99,6 +99,17 @@ export const actions: Actions = {
 		return { success: true, message: 'Printer added.' };
 	},
 
+	// Rename a printer.
+	rename: async ({ request, locals }) => {
+		const me = requireAdmin(locals.user);
+		const fd = await request.formData();
+		const id = String(fd.get('id'));
+		const name = String(fd.get('name') ?? '').trim();
+		if (name.length < 1 || name.length > 60) return fail(400, { error: 'Printer name must be 1–60 characters.' });
+		await db.update(printers).set({ name, updatedAt: new Date() }).where(and(eq(printers.id, id), eq(printers.orgId, me.orgId)));
+		return { success: true };
+	},
+
 	setPriority: async ({ request, locals }) => {
 		const me = requireAdmin(locals.user);
 		const fd = await request.formData();
