@@ -211,6 +211,63 @@ function parseMetrics(gcode: string, resultJson: string): { grams: number; timeS
 	return { grams, timeSec };
 }
 
+/** Parse the real bed polygon from a machine profile's `printable_area` (["0x0","256x0",…]) → the
+ *  bed's bounds + centre in mm. Returns null if the profile doesn't declare it directly. */
+async function readBed(machinePath: string) {
+	try {
+		const json = JSON.parse(await readFile(machinePath, 'utf8')) as { printable_area?: unknown };
+		const pa = json.printable_area;
+		if (!Array.isArray(pa) || pa.length < 3) return null;
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		for (const pt of pa) {
+			const [x, y] = String(pt).split('x').map(Number);
+			if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+			minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+			minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+		}
+		if (!Number.isFinite(minX) || maxX <= minX) return null;
+		return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, d: maxY - minY };
+	} catch {
+		return null;
+	}
+}
+
+/** Centre a binary STL on the real bed (from readBed). The editor exports models around (0,0) but
+ *  the slicer bed is corner-origin, so we translate XY so the model's centre sits at the bed centre —
+ *  deterministic, no dependence on the slicer's flaky --arrange. Returns the new file path, or null
+ *  if the file isn't a binary STL. Throws a clear error if the model is larger than the bed. */
+async function centerStlOnBed(path: string, bed: NonNullable<Awaited<ReturnType<typeof readBed>>>, outDir: string): Promise<string | null> {
+	const buf = await readFile(path).catch(() => null);
+	if (!buf || buf.length < 84) return null;
+	const tris = buf.readUInt32LE(80);
+	if (buf.length !== 84 + tris * 50) return null; // not a binary STL (ASCII / 3mf) — leave it to --arrange
+	let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	for (let t = 0; t < tris; t++) {
+		const b = 84 + t * 50 + 12; // skip the 12-byte normal
+		for (let v = 0; v < 3; v++) {
+			const o = b + v * 12;
+			const x = buf.readFloatLE(o), y = buf.readFloatLE(o + 4);
+			minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+			minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+		}
+	}
+	if (maxX - minX > bed.w + 0.5 || maxY - minY > bed.d + 0.5) {
+		throw new Error(`Model is ${Math.ceil(maxX - minX)}×${Math.ceil(maxY - minY)} mm but the bed is only ${bed.w}×${bed.d} mm — scale it down or split it.`);
+	}
+	const dx = bed.cx - (minX + maxX) / 2, dy = bed.cy - (minY + maxY) / 2;
+	for (let t = 0; t < tris; t++) {
+		const b = 84 + t * 50 + 12;
+		for (let v = 0; v < 3; v++) {
+			const o = b + v * 12;
+			buf.writeFloatLE(buf.readFloatLE(o) + dx, o);
+			buf.writeFloatLE(buf.readFloatLE(o + 4) + dy, o + 4);
+		}
+	}
+	const outPath = join(outDir, 'centered.stl');
+	await writeFile(outPath, buf);
+	return outPath;
+}
+
 export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promise<OrcaResult | null> {
 	const loc = await locate();
 	if (!loc || !loc.xvfb) return null;
@@ -242,6 +299,20 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 
 	const machinePath = join(loc.profiles, 'machine', `${machineName}.json`);
 	const filamentPaths = filamentNames.map((f) => join(loc.profiles, 'filament', `${f}.json`)).join(';');
+
+	// Position the model deterministically using the printer's REAL bed dimensions: read the bed
+	// polygon from the machine profile and translate the (binary STL) model so it's centred on the
+	// bed. This removes the dependency on OrcaSlicer's --arrange (which was leaving models at the
+	// corner-origin → "no object fully inside"). If we can't read the bed or it isn't a binary STL
+	// (e.g. a painted 3MF), we fall back to --arrange.
+	const bed = await readBed(machinePath);
+	let sliceModel = modelPath;
+	let useArrange = true;
+	if (bed) {
+		const centered = await centerStlOnBed(modelPath, bed, outDir); // throws if the model exceeds the bed
+		if (centered) { sliceModel = centered; useArrange = false; }
+	}
+
 	// --export-3mf produces a proper Bambu printable 3mf (Metadata/plate_1.gcode + md5 + plate
 	// config) — that's what Bambu's cloud accepts. Its path is resolved relative to --outputdir,
 	// so pass a bare filename. --slice 0 also drops plate_1.gcode, which we parse for metrics.
@@ -253,21 +324,14 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		`${machinePath};${overridePath}`,
 		'--load-filaments',
 		filamentPaths,
-		// NOTE: do NOT set curr_bed_type here (process override) or via a --curr-bed-type CLI flag — both
-		// make OrcaSlicer build a broken/empty plate → "no object fully inside" on every slice. Bed type
-		// is left at the machine profile default; bed temperature is handled at print time.
-		// Auto-arrange onto the plate before slicing. Bambu's plate origin is a corner, but our editor
-		// exports models centered at (0,0) (also nudged to plate-centre at export); arrange places them
-		// properly so nothing slices half-off the bed → spaghetti.
-		'--arrange',
-		'1',
+		...(useArrange ? ['--arrange', '1'] : []),
 		'--slice',
 		'0',
 		'--export-3mf',
 		threeMfName,
 		'--outputdir',
 		outDir,
-		modelPath
+		sliceModel
 	];
 	const { code, out } = await run('xvfb-run', args);
 
