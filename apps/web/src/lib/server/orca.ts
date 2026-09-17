@@ -258,11 +258,9 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		`${machinePath};${overridePath}`,
 		'--load-filaments',
 		filamentPaths,
-		// Pin the bed type (documented CLI flag) so the sliced G-code uses that plate's bed temperature
-		// — otherwise CLI slicing can pick the Cool Plate and the bed only heats to ~35°C. Matches the
-		// bed_type (textured_pei_plate) we send to the printer at start.
-		'--curr-bed-type',
-		'Textured PEI Plate',
+		// Bed type (→ correct bed temperature) is pinned via curr_bed_type in the process override
+		// above; we intentionally do NOT pass a --curr-bed-type CLI flag, because an unrecognized value
+		// there makes OrcaSlicer build an empty plate ("no object fully inside") and fail every slice.
 		// Auto-arrange onto the plate before slicing. Bambu's plate origin is a corner, but our editor
 		// exports models centered at (0,0); without this they'd slice half-off the bed → prints in air
 		// → spaghetti. Arrange centers/places them properly.

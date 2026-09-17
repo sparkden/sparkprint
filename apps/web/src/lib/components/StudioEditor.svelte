@@ -533,24 +533,32 @@
 		const g = new THREE.Group();
 		const R = 4; // pencil body radius (≈ 8 mm across)
 
-		// Pencil — hex body + wood cone + graphite tip + eraser, lying along Z.
+		// Pencil — a real #2 pencil: ~178 mm long, 8 mm across the hex body, lying along Z. Built end to
+		// end so the parts meet cleanly (no gaps, no popped-out tip): eraser · ferrule · body · sharpened
+		// wood cone · graphite point.
 		const pencil = new THREE.Group();
-		const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 150, 6), new THREE.MeshStandardMaterial({ color: 0xf2b01e, roughness: 0.55 }));
-		body.rotation.x = Math.PI / 2;
-		const wood = new THREE.Mesh(new THREE.ConeGeometry(R, 18, 6), new THREE.MeshStandardMaterial({ color: 0xe8d3ad, roughness: 0.7 }));
-		wood.rotation.x = -Math.PI / 2; wood.position.z = 84;
-		const lead = new THREE.Mesh(new THREE.ConeGeometry(1.3, 5, 6), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.5 }));
-		lead.rotation.x = -Math.PI / 2; lead.position.z = 95.5;
-		const band = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.3, R + 0.3, 10, 6), new THREE.MeshStandardMaterial({ color: 0xc0c6cc, metalness: 0.7, roughness: 0.35 }));
-		band.rotation.x = Math.PI / 2; band.position.z = -80;
-		const eraser = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 9, 6), new THREE.MeshStandardMaterial({ color: 0xe58b8b, roughness: 0.8 }));
-		eraser.rotation.x = Math.PI / 2; eraser.position.z = -89.5;
+		const yellow = new THREE.MeshStandardMaterial({ color: 0xf2b01e, roughness: 0.55 });
+		const BODY = 150; // painted hex body length
+		const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, BODY, 6), yellow);
+		body.rotation.x = Math.PI / 2; // hex body spans z ∈ [-75, 75]
+		// Sharpened end (+z): a wood frustum tapering from the body radius down to the graphite, then a
+		// short dark cone for the exposed lead — so the point reads as a real sharpened tip.
+		const wood = new THREE.Mesh(new THREE.CylinderGeometry(1.4, R, 15, 6), new THREE.MeshStandardMaterial({ color: 0xe8d3ad, roughness: 0.7 }));
+		wood.rotation.x = -Math.PI / 2; wood.position.z = 75 + 15 / 2; // base (R) meets body end, taper toward +z
+		const lead = new THREE.Mesh(new THREE.ConeGeometry(1.4, 4, 12), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.5 }));
+		lead.rotation.x = -Math.PI / 2; lead.position.z = 90 + 4 / 2; // continues from the wood tip (radius 1.4)
+		// Back end (−z): metal ferrule + pink eraser, flush with the body.
+		const band = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.2, R + 0.2, 9, 6), new THREE.MeshStandardMaterial({ color: 0xc0c6cc, metalness: 0.7, roughness: 0.35 }));
+		band.rotation.x = Math.PI / 2; band.position.z = -75 - 9 / 2;
+		const eraser = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.3, R - 0.3, 8, 16), new THREE.MeshStandardMaterial({ color: 0xe58b8b, roughness: 0.8 }));
+		eraser.rotation.x = Math.PI / 2; eraser.position.z = -84 - 8 / 2;
 		pencil.add(body, wood, lead, band, eraser);
 		for (const c of pencil.children) c.castShadow = true;
-		pencil.position.set(plate.x / 2 + 24, R, -10);
+		pencil.position.set(plate.x / 2 + 26, R, 0); // beside the plate, resting on it
 		g.add(pencil);
 
-		// Paperclip — steel wire bent into the classic double loop, resting flat.
+		// Paperclip — steel wire bent into the classic double loop, resting flat. Placed clearly to the
+		// RIGHT of the pencil (its own X band) so the two never intersect.
 		const clip2d = [
 			[0, 3.6], [24, 3.6], [28, 0], [24, -3.6], [4, -3.6], [0, 0],
 			[4, 1.9], [20, 1.9], [22.5, 0], [20, -1.9], [8, -1.9]
@@ -558,7 +566,7 @@
 		const curve = new THREE.CatmullRomCurve3(clip2d.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'catmullrom', 0.4);
 		const clip = new THREE.Mesh(new THREE.TubeGeometry(curve, 120, 0.6, 10, false), new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 0.85, roughness: 0.3 }));
 		clip.castShadow = true;
-		clip.position.set(plate.x / 2 + 20, 0.7, 40);
+		clip.position.set(plate.x / 2 + 48, 0.7, -14); // pencil occupies x≈[22,30]; clip sits at x≈[48,76]
 		g.add(clip);
 
 		return g;
