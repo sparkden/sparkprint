@@ -62,6 +62,7 @@
 	let raft = $state(false);
 	let copies = $state(1);
 	let speed = $state(2); // Bambu speed profile: 1 Silent · 2 Standard · 3 Sport · 4 Ludicrous
+	let bedTemp = $state<number | null>(null); // bed temperature °C; null = auto (per-material default)
 	const SPEED = [
 		{ v: 1, label: 'Silent' },
 		{ v: 2, label: 'Standard' },
@@ -282,7 +283,7 @@
 						formData.set('copies', String(copies));
 						formData.set('speedLevel', String(speed));
 						formData.set('printerModelTarget', 'auto');
-						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: infill, supports, raft, adhesion: raft ? 'raft' : 'none' }));
+						formData.set('process', JSON.stringify({ layerHeightMm: quality, infillPct: infill, supports, raft, adhesion: raft ? 'raft' : 'none', ...(bedTemp ? { bedTempC: bedTemp } : {}) }));
 						const thumb = editor?.captureThumbnail?.();
 						if (thumb) formData.set('thumbnail', thumb);
 
@@ -370,6 +371,18 @@
 							{#each SPEED as s}<button type="button" onclick={() => (speed = s.v)} class="btn btn-sm {speed === s.v ? 'btn-primary' : 'btn-secondary'}">{s.label}</button>{/each}
 						</div>
 						<p class="mt-1 text-xs text-muted-ink">Faster prints can lower quality. You can change this mid-print too.</p>
+					</div>
+
+					<div>
+						<div class="mb-1 flex items-center justify-between"><span class="label mb-0">Bed temperature</span><span class="text-xs font-semibold text-ink">{bedTemp ? `${bedTemp}°C` : 'Auto'}</span></div>
+						<input type="range" min="0" max="110" step="5" value={bedTemp ?? 60} oninput={(e) => { bedTemp = Number(e.currentTarget.value); invalidatePreview(); }} class="w-full accent-[#1e2f66]" />
+						<div class="mt-1 flex flex-wrap gap-1.5">
+							<button type="button" onclick={() => { bedTemp = null; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {bedTemp === null ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">Auto</button>
+							{#each [55, 60, 65, 70, 90] as t}
+								<button type="button" onclick={() => { bedTemp = t; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {bedTemp === t ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">{t}°</button>
+							{/each}
+						</div>
+						<p class="mt-1 text-xs text-muted-ink">Auto uses the recommended temp (PLA 60°C). Higher helps the first layer stick.</p>
 					</div>
 
 					<label class="flex items-center gap-2.5 text-sm font-medium text-soft-ink"><input type="checkbox" bind:checked={supports} onchange={invalidatePreview} class="h-4 w-4 rounded accent-[#1e2f66]" /> Supports <span class="text-xs font-normal text-muted-ink">— for overhangs</span></label>

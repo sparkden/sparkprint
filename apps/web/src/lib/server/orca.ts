@@ -27,6 +27,7 @@ export type OrcaSettings = {
 	printerModel?: string; // our model code: X1C | X1 | X1E | P1S | P1P | A1 | A1M | H2D
 	filamentType?: string; // 'PLA' | 'PLA Matte' | 'PETG' | 'ABS' | 'TPU'
 	filamentTypes?: string[]; // one per color for multicolor (AMS) — overrides filamentType
+	bedTempC?: number; // override the bed temperature (°C); default is the per-material recommendation
 };
 
 export type OrcaResult = { gcodePath: string; grams: number; timeSec: number };
@@ -61,6 +62,21 @@ const FAMILY: Record<string, string> = {
 	H2D: 'H2D'
 };
 const ALL_MACHINES = Object.values(MACHINE);
+
+// Bed temperature per material (initial layer / rest, °C). Bambu CLI slicing defaults to a plate whose
+// PLA temp is only ~35°C, so prints don't stick and slide off. We force a proper sticky bed temp by
+// overriding the FILAMENT's per-plate temps (a valid filament setting — unlike curr_bed_type, which
+// corrupts the plate config).
+function bedTempFor(type: string): { first: string; rest: string } {
+	const t = (type || 'PLA').toUpperCase();
+	if (t.includes('PETG')) return { first: '70', rest: '70' };
+	if (t.includes('ABS') || t.includes('ASA')) return { first: '90', rest: '90' };
+	if (t.includes('TPU')) return { first: '45', rest: '45' };
+	if (t.includes('PC')) return { first: '90', rest: '100' };
+	if (t.includes('PA') || t.includes('NYLON')) return { first: '80', rest: '90' };
+	return { first: '60', rest: '55' }; // PLA (+ PVA/default): 60°C first layer so it sticks
+}
+const PLATE_TEMP_KEYS = ['cool_plate_temp', 'eng_plate_temp', 'hot_plate_temp', 'textured_plate_temp', 'supertack_plate_temp'];
 
 // Real Bambu build-plate sizes (mm). The bed is corner-origin (0,0)→(w,d); centre is (w/2, d/2).
 // Used to place models deterministically (see centerStlOnBed) — more reliable than parsing the
@@ -321,7 +337,30 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	await writeFile(overridePath, JSON.stringify(override));
 
 	const machinePath = join(loc.profiles, 'machine', `${machineName}.json`);
-	const filamentPaths = filamentNames.map((f) => join(loc.profiles, 'filament', `${f}.json`)).join(';');
+	// Force a proper (sticky) bed temperature by writing a copy of each filament profile with every
+	// plate's temp overridden — so it applies whatever plate the printer defaults to. Uses the
+	// student's bedTempC if set, otherwise the per-material recommendation. Falls back to the stock
+	// profile if anything goes wrong.
+	const filamentPaths = (
+		await Promise.all(
+			filamentNames.map(async (f, i) => {
+				const src = join(loc.profiles, 'filament', `${f}.json`);
+				try {
+					const fj = JSON.parse(await readFile(src, 'utf8')) as Record<string, unknown>;
+					const def = bedTempFor(filTypes[i] ?? s.filamentType ?? 'PLA');
+					const first = typeof s.bedTempC === 'number' ? String(Math.round(s.bedTempC)) : def.first;
+					const rest = typeof s.bedTempC === 'number' ? String(Math.round(s.bedTempC)) : def.rest;
+					for (const k of PLATE_TEMP_KEYS) { fj[k] = [rest]; fj[`${k}_initial_layer`] = [first]; }
+					fj.name = `sparkprint_fil_${i}`; // unique name so multi-filament loads don't collide
+					const p = join(outDir, `filament_${i}.json`);
+					await writeFile(p, JSON.stringify(fj));
+					return p;
+				} catch {
+					return src;
+				}
+			})
+		)
+	).join(';');
 
 	// Position the model deterministically using the printer's REAL bed dimensions: read the bed
 	// polygon from the machine profile and translate the (binary STL) model so it's centred on the

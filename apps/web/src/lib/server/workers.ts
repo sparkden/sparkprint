@@ -46,7 +46,8 @@ async function sliceJob(jobId: string) {
 		adhesion: typeof proc.adhesion === 'string' ? proc.adhesion : undefined,
 		printerModel,
 		filamentType,
-		filamentTypes: filamentTypes.length > 1 ? filamentTypes : undefined
+		filamentTypes: filamentTypes.length > 1 ? filamentTypes : undefined,
+		bedTempC: typeof proc.bedTempC === 'number' ? proc.bedTempC : undefined
 	};
 	let result;
 	try {

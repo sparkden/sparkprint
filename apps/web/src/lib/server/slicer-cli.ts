@@ -29,6 +29,7 @@ export type SliceSettings = {
 	printerModel?: string; // X1C | P1S | … — selects the OrcaSlicer machine profile
 	filamentType?: string; // 'PLA' | 'PETG' | 'ABS' — selects the filament profile
 	filamentTypes?: string[]; // one per color for multicolor (AMS)
+	bedTempC?: number; // override the bed temperature (°C)
 };
 
 const CANDIDATES = ['orca-slicer', 'OrcaSlicer', 'prusa-slicer', 'prusa-slicer-console', 'superslicer', 'slic3r', 'bambu-studio', 'CuraEngine'];
