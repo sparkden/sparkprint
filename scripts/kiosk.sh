@@ -44,6 +44,10 @@ case "$CMD" in
 		# The kiosk runs on tty1 (the screen shown at boot). Stop the console login there so it doesn't
 		# hold the display with a "login:" prompt. (Restored on disable.)
 		systemctl disable --now getty@tty1.service >/dev/null 2>&1 || true
+		# Give admins an escape hatch: a real login console on tty2/tty3 so Ctrl+Alt+F2 (or F3) drops to
+		# a terminal and Ctrl+Alt+F1 returns to the kiosk. Started statically (not autovt) so it's always
+		# there regardless of the seat manager.
+		systemctl enable --now getty@tty2.service getty@tty3.service >/dev/null 2>&1 || true
 
 		# Launch wrapper: minimal Wayland kiosk (cage) running one fullscreen Chromium tab.
 		cat > "$LAUNCH" <<LAUNCHEOF
@@ -93,6 +97,7 @@ UNITEOF
 			echo "  Logs: journalctl -u sparkprint-kiosk -e"
 		fi
 		echo "  URL: $URL"
+		echo "  Exit: press Ctrl+Alt+F2 for a login terminal, Ctrl+Alt+F1 to return to the kiosk."
 		;;
 	disable)
 		systemctl disable --now sparkprint-kiosk >/dev/null 2>&1 || true
