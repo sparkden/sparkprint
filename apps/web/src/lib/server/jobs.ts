@@ -13,7 +13,7 @@ import {
 } from './db/schema';
 import { getEstimator, type SliceInput } from './slicer';
 import { canSubmit } from './quota';
-import { colorDistance } from '$lib/color';
+import { colorDistance, normalizeHex } from '$lib/color';
 import { readBuffer, objectExists } from './storage';
 import { enqueueSlice, enqueueDispatch } from './queue';
 import { lanPrint } from './bambu/lan';
@@ -38,8 +38,6 @@ async function logEventOnce(jobId: string, type: string, message: string) {
 }
 
 // ── Color matching ────────────────────────────────────────────────────────────
-const COLOR_TOLERANCE = 70;
-
 type LoadedSlot = {
 	id: string;
 	amsIndex: number;
@@ -68,25 +66,21 @@ function matchSlot(req: ColorRequest, slots: LoadedSlot[]): LoadedSlot | null {
 	}
 	const typeOk = (s: LoadedSlot) => !req.filamentType || !s.filamentType || s.filamentType.toUpperCase() === req.filamentType.toUpperCase();
 
-	// 1) Prefer an EXACT color-name match. Two loaded colors can be visually close (e.g. dark navy vs
-	// black), so honour the exact filament the student picked by name before falling back to nearest
-	// hue — otherwise a black request could grab a near-black navy slot.
-	if (req.colorName) {
-		const want = req.colorName.trim().toLowerCase();
-		const named = slots.find((s) => !s.empty && s.colorHex && typeOk(s) && (s.colorName ?? '').trim().toLowerCase() === want);
-		if (named) return named;
-	}
-
-	// 2) Otherwise the nearest colour within tolerance.
+	// EXACT match only — never substitute a visually-close but different colour (dark navy vs black).
+	// A slot qualifies if its hex is the same as requested (allowing a tiny rounding delta from
+	// telemetry) OR its colour name is exactly the one the student picked. If nothing on this printer
+	// matches, we return null so dispatch moves on to a printer that actually has the colour loaded.
+	const wantHex = normalizeHex(req.colorHex);
+	const wantName = req.colorName?.trim().toLowerCase();
 	let best: LoadedSlot | null = null;
 	let bestDist = Infinity;
 	for (const s of slots) {
 		if (s.empty || !s.colorHex || !typeOk(s)) continue;
-		const dist = colorDistance(req.colorHex, s.colorHex);
-		if (dist <= COLOR_TOLERANCE && dist < bestDist) {
-			best = s;
-			bestDist = dist;
-		}
+		const hexMatch = wantHex && normalizeHex(s.colorHex) === wantHex;
+		const nameMatch = wantName && (s.colorName ?? '').trim().toLowerCase() === wantName;
+		if (!hexMatch && !nameMatch) continue;
+		const dist = colorDistance(req.colorHex, s.colorHex); // tie-break: closest hex wins
+		if (dist < bestDist) { best = s; bestDist = dist; }
 	}
 	return best;
 }
