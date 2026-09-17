@@ -260,16 +260,17 @@
 		m.position.y -= box.min.y; // sit on plate (y = 0)
 	}
 
-	function addGeometry(geometry: any, name: string, srcHex?: string | null) {
+	function addGeometry(geometry: any, name: string, srcHex?: string | null, explicit?: { color: LabColor; custom: boolean }) {
 		let g = geometry.index ? geometry.toNonIndexed() : geometry;
 		g.rotateX(-Math.PI / 2); // model Z-up → three Y-up (display)
 		g.computeVertexNormals();
 		g.center();
 		const id = uid();
 		// Colors imported from the file (e.g. Fusion 3MF bodies) map to the nearest lab color and
-		// are treated as user-set so the default-color picker doesn't override them.
-		const custom = !!srcHex;
-		const color = srcHex ? nearestLab(srcHex) : baseColor();
+		// are treated as user-set so the default-color picker doesn't override them. `explicit` is used
+		// when duplicating so the copy inherits the original's exact colour (and custom flag).
+		const custom = explicit ? explicit.custom : !!srcHex;
+		const color = explicit ? explicit.color : srcHex ? nearestLab(srcHex) : baseColor();
 		const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color.colorHex), roughness: 0.5, metalness: 0.04 });
 		const m = new THREE.Mesh(g, mat);
 		m.castShadow = true;
@@ -358,8 +359,14 @@
 		const src = meshes.get(selectedId); const row = objects.find((o) => o.id === selectedId);
 		if (!src || !row) return;
 		pushUndo();
-		addGeometry(src.geometry.clone().applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)), row.name + ' copy');
-		// (re-bake to Z-up first so addGeometry's -90 X restores orientation)
+		// (re-bake to Z-up first so addGeometry's -90 X restores orientation) — and inherit the
+		// original's exact colour + custom flag so a duplicate never silently becomes a second colour.
+		addGeometry(
+			src.geometry.clone().applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)),
+			row.name + ' copy',
+			null,
+			{ color: row.color, custom: !!src.userData.custom }
+		);
 	}
 
 	function footprint(m: any) {
