@@ -603,9 +603,11 @@
 
 	/** Recolor all objects that the user hasn't individually set (the single-color / default path). */
 	export function setDefaultColor(c: LabColor) {
+		// The sidebar color is the master: recolor EVERY object's base and clear per-object overrides.
+		// (Per-object fine-tuning / multicolor is done afterward with the object palette.)
 		for (const o of objects) {
 			const m = meshes.get(o.id);
-			if (m && !m.userData.custom) { m.material.color = new THREE.Color(c.colorHex); o.color = c; }
+			if (m) { m.material.color = new THREE.Color(c.colorHex); m.userData.custom = false; o.color = c; }
 		}
 		objects = [...objects];
 		oncolors?.(getColorRequest());

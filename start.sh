@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+also#!/usr/bin/env bash
 # ==============================================================================
 #  start.sh  --  run your app and get a public URL (via Cloudflare Tunnel)
 #

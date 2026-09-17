@@ -6,8 +6,12 @@
 	import { timeAgo } from '$lib/status';
 	let { data, form } = $props();
 
-	let editing = $state<null | (typeof data.members)[number]>(null);
+	let editingId = $state<string | null>(null);
 	let open = $state(false);
+	let quotaSaved = $state<string | null>(null); // shows a brief "Saved ✓" after a quota update
+	// Track the member by id and read live from `data.members`, so after a save (which invalidates the
+	// page data) the modal shows the updated values instead of a stale snapshot.
+	const editing = $derived(editingId ? (data.members.find((m) => m.id === editingId) ?? null) : null);
 
 	const roleBadge: Record<string, string> = {
 		owner: 'badge-spark',
@@ -17,7 +21,7 @@
 	};
 
 	function manage(m: (typeof data.members)[number]) {
-		editing = m;
+		editingId = m.id;
 		open = true;
 	}
 	const canEditOwners = $derived(data.myRole === 'owner');
@@ -91,7 +95,7 @@
 			<a href="/admin/members/{m.id}" class="text-sm font-semibold text-spark hover:underline">View all their prints →</a>
 
 			<!-- Role -->
-			<form method="POST" action="?/updateRole" use:enhance class="flex items-end gap-3">
+			<form method="POST" action="?/updateRole" use:enhance={() => async ({ update }) => { await update({ reset: false }); }} class="flex items-end gap-3">
 				<input type="hidden" name="userId" value={m.id} />
 				<div class="flex-1">
 					<label class="label" for="role">Role</label>
@@ -106,9 +110,9 @@
 			</form>
 
 			<!-- Quota -->
-			<form method="POST" action="?/updateQuota" use:enhance class="space-y-3">
+			<form method="POST" action="?/updateQuota" use:enhance={() => async ({ update }) => { await update({ reset: false }); quotaSaved = m.id; setTimeout(() => (quotaSaved = null), 2000); }} class="space-y-3">
 				<input type="hidden" name="userId" value={m.id} />
-				<p class="label">Quota override (blank = lab default)</p>
+				<p class="label">Quota override (blank = lab default){#if quotaSaved === m.id}<span class="ml-2 text-xs font-semibold text-success">Saved ✓</span>{/if}</p>
 				<div class="flex items-end gap-3">
 					<div class="flex-1">
 						<label class="label text-xs" for="g">Filament / month (g)</label>
