@@ -236,6 +236,10 @@
 			const g = m.geometry.clone();
 			g.applyMatrix4(m.matrixWorld);
 			g.rotateX(Math.PI / 2); // Y-up display → Z-up for slicing
+			// The editor centers models around (0,0); the slicer's plate origin is a CORNER. Shift to the
+			// plate centre so the model lands fully inside the bed without relying on the slicer's arrange
+			// (which was leaving models at the corner → "no object fully inside" slice failures).
+			g.translate(plate.x / 2, plate.y / 2, 0);
 			group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial()));
 		}
 		group.updateMatrixWorld(true);
@@ -543,10 +547,12 @@
 		body.rotation.x = Math.PI / 2; // hex body spans z ∈ [-75, 75]
 		// Sharpened end (+z): a wood frustum tapering from the body radius down to the graphite, then a
 		// short dark cone for the exposed lead — so the point reads as a real sharpened tip.
+		// rotation.x = +90° maps the geometry's +Y to +Z (forward), so the narrow end (radiusTop 1.4)
+		// points toward the tip and the wide end (radiusBottom R) meets the body — a real sharpened cone.
 		const wood = new THREE.Mesh(new THREE.CylinderGeometry(1.4, R, 15, 6), new THREE.MeshStandardMaterial({ color: 0xe8d3ad, roughness: 0.7 }));
-		wood.rotation.x = -Math.PI / 2; wood.position.z = 75 + 15 / 2; // base (R) meets body end, taper toward +z
+		wood.rotation.x = Math.PI / 2; wood.position.z = 75 + 15 / 2; // wide base (R) meets body end, tapers to +z
 		const lead = new THREE.Mesh(new THREE.ConeGeometry(1.4, 4, 12), new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.5 }));
-		lead.rotation.x = -Math.PI / 2; lead.position.z = 90 + 4 / 2; // continues from the wood tip (radius 1.4)
+		lead.rotation.x = Math.PI / 2; lead.position.z = 90 + 4 / 2; // graphite point continues forward from the wood tip
 		// Back end (−z): metal ferrule + pink eraser, flush with the body.
 		const band = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.2, R + 0.2, 9, 6), new THREE.MeshStandardMaterial({ color: 0xc0c6cc, metalness: 0.7, roughness: 0.35 }));
 		band.rotation.x = Math.PI / 2; band.position.z = -75 - 9 / 2;
@@ -641,6 +647,7 @@
 			const g = m.geometry.clone();
 			g.applyMatrix4(m.matrixWorld);
 			g.rotateX(Math.PI / 2); // Y-up display → Z-up for slicing
+			g.translate(plate.x / 2, plate.y / 2, 0); // centre on the slicer's corner-origin plate (see exportSTL)
 			const ng = g.index ? g.toNonIndexed() : g;
 			const pos = ng.getAttribute('position').array as Float32Array;
 			const nTri = pos.length / 9;
