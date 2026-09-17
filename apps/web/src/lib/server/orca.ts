@@ -341,19 +341,22 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	console.log(`[orca] model=${model} bed=${bed ? `${bed.w}x${bed.d}@(${bed.cx},${bed.cy})` : 'unknown'} centered=${!useArrange} file=${sliceModel.split('/').pop()}`);
 
 	// Use the WHOLE plate: Bambu profiles reserve a calibration/wiper strip (bed_exclude_area) that
-	// makes OrcaSlicer reject big parts as "not fully inside" even when they physically fit. We layer a
-	// machine override that clears the exclusion and pins the printable area to the full bed. (Safe
-	// because we always centre the model, so it never sits over the front wiper corner.)
-	const machineOverridePath = join(outDir, 'machine_override.json');
-	const machineOverride: Record<string, unknown> = {
-		type: 'machine',
-		name: 'sparkprint_machine',
-		from: 'User',
-		instantiation: 'true',
-		bed_exclude_area: []
-	};
-	if (bd) machineOverride.printable_area = ['0x0', `${bd.w}x0`, `${bd.w}x${bd.d}`, `0x${bd.d}`];
-	await writeFile(machineOverridePath, JSON.stringify(machineOverride));
+	// makes OrcaSlicer reject big parts as "not fully inside" even when they physically fit. Loading a
+	// SECOND machine preset is rejected ("duplicate machine config"), so instead we load a copy of the
+	// real machine profile with the exclusion cleared and the printable area pinned to the full bed —
+	// same name/inherits, so OrcaSlicer resolves it exactly like the original. (Safe: we always centre
+	// the model, so it never sits over the front wiper corner.)
+	let machineLoad = machinePath;
+	try {
+		const mj = JSON.parse(await readFile(machinePath, 'utf8')) as Record<string, unknown>;
+		mj.bed_exclude_area = [];
+		if (bd) mj.printable_area = ['0x0', `${bd.w}x0`, `${bd.w}x${bd.d}`, `0x${bd.d}`];
+		const p = join(outDir, 'machine.json');
+		await writeFile(p, JSON.stringify(mj));
+		machineLoad = p;
+	} catch {
+		/* fall back to the stock profile path */
+	}
 
 	// --export-3mf produces a proper Bambu printable 3mf (Metadata/plate_1.gcode + md5 + plate
 	// config) — that's what Bambu's cloud accepts. Its path is resolved relative to --outputdir,
@@ -365,7 +368,7 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 		'--debug',
 		'2', // verbose OrcaSlicer logging so failures explain themselves in the captured output
 		'--load-settings',
-		`${machinePath};${machineOverridePath};${overridePath}`,
+		`${machineLoad};${overridePath}`,
 		'--load-filaments',
 		filamentPaths,
 		...(useArrange ? ['--arrange', '1'] : []),
