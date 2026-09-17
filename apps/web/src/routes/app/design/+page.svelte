@@ -378,7 +378,7 @@
 						<input type="range" min="0" max="110" step="5" value={bedTemp ?? 60} oninput={(e) => { bedTemp = Number(e.currentTarget.value); invalidatePreview(); }} class="w-full accent-[#1e2f66]" />
 						<div class="mt-1 flex flex-wrap gap-1.5">
 							<button type="button" onclick={() => { bedTemp = null; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {bedTemp === null ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">Auto</button>
-							{#each [55, 60, 65, 70, 90] as t}
+							{#each [55, 60, 65, 75, 90] as t}
 								<button type="button" onclick={() => { bedTemp = t; invalidatePreview(); }} class="rounded px-2 py-0.5 text-xs {bedTemp === t ? 'bg-spark-soft text-spark-deep' : 'bg-warm-100 text-muted-ink hover:bg-warm-200'}">{t}°</button>
 							{/each}
 						</div>

@@ -63,18 +63,20 @@ const FAMILY: Record<string, string> = {
 };
 const ALL_MACHINES = Object.values(MACHINE);
 
-// Bed temperature per material (initial layer / rest, °C). Bambu CLI slicing defaults to a plate whose
-// PLA temp is only ~35°C, so prints don't stick and slide off. We force a proper sticky bed temp by
-// overriding the FILAMENT's per-plate temps (a valid filament setting — unlike curr_bed_type, which
-// corrupts the plate config).
-function bedTempFor(type: string): { first: string; rest: string } {
+// Bed + nozzle temperatures per material (°C) for a clean print that sticks. Bambu CLI slicing
+// defaults to a plate whose PLA temp is only ~35°C, so prints slide off; we force a proper sticky bed
+// temp AND the right nozzle temp by overriding the FILAMENT profile (valid filament settings — unlike
+// curr_bed_type, which corrupts the plate config).
+type MatTemps = { bedFirst: number; bed: number; nozzle: number; nozzleFirst: number };
+function matTemps(type: string): MatTemps {
 	const t = (type || 'PLA').toUpperCase();
-	if (t.includes('PETG')) return { first: '70', rest: '70' };
-	if (t.includes('ABS') || t.includes('ASA')) return { first: '90', rest: '90' };
-	if (t.includes('TPU')) return { first: '45', rest: '45' };
-	if (t.includes('PC')) return { first: '90', rest: '100' };
-	if (t.includes('PA') || t.includes('NYLON')) return { first: '80', rest: '90' };
-	return { first: '60', rest: '55' }; // PLA (+ PVA/default): 60°C first layer so it sticks
+	if (t.includes('PETG')) return { bedFirst: 75, bed: 75, nozzle: 255, nozzleFirst: 255 };
+	if (t.includes('ASA')) return { bedFirst: 90, bed: 90, nozzle: 260, nozzleFirst: 270 };
+	if (t.includes('ABS')) return { bedFirst: 90, bed: 90, nozzle: 260, nozzleFirst: 270 };
+	if (t.includes('TPU')) return { bedFirst: 45, bed: 45, nozzle: 230, nozzleFirst: 230 };
+	if (t.includes('PC')) return { bedFirst: 100, bed: 100, nozzle: 270, nozzleFirst: 270 };
+	if (t.includes('PA') || t.includes('NYLON')) return { bedFirst: 80, bed: 90, nozzle: 290, nozzleFirst: 290 };
+	return { bedFirst: 60, bed: 55, nozzle: 220, nozzleFirst: 220 }; // PLA (+ PVA/default)
 }
 const PLATE_TEMP_KEYS = ['cool_plate_temp', 'eng_plate_temp', 'hot_plate_temp', 'textured_plate_temp', 'supertack_plate_temp'];
 
@@ -347,10 +349,16 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 				const src = join(loc.profiles, 'filament', `${f}.json`);
 				try {
 					const fj = JSON.parse(await readFile(src, 'utf8')) as Record<string, unknown>;
-					const def = bedTempFor(filTypes[i] ?? s.filamentType ?? 'PLA');
-					const first = typeof s.bedTempC === 'number' ? String(Math.round(s.bedTempC)) : def.first;
-					const rest = typeof s.bedTempC === 'number' ? String(Math.round(s.bedTempC)) : def.rest;
-					for (const k of PLATE_TEMP_KEYS) { fj[k] = [rest]; fj[`${k}_initial_layer`] = [first]; }
+					const m = matTemps(filTypes[i] ?? s.filamentType ?? 'PLA');
+					// Bed temp: student override wins, else the per-material default.
+					const bedFirst = String(typeof s.bedTempC === 'number' ? Math.round(s.bedTempC) : m.bedFirst);
+					const bed = String(typeof s.bedTempC === 'number' ? Math.round(s.bedTempC) : m.bed);
+					for (const k of PLATE_TEMP_KEYS) { fj[k] = [bed]; fj[`${k}_initial_layer`] = [bedFirst]; }
+					// Nozzle temp for a clean flow — and widen the allowed range so our value validates.
+					fj.nozzle_temperature = [String(m.nozzle)];
+					fj.nozzle_temperature_initial_layer = [String(m.nozzleFirst)];
+					fj.nozzle_temperature_range_low = [String(Math.min(m.nozzle, m.nozzleFirst) - 30)];
+					fj.nozzle_temperature_range_high = [String(Math.max(m.nozzle, m.nozzleFirst) + 30)];
 					fj.name = `sparkprint_fil_${i}`; // unique name so multi-filament loads don't collide
 					const p = join(outDir, `filament_${i}.json`);
 					await writeFile(p, JSON.stringify(fj));

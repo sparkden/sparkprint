@@ -11,11 +11,31 @@
 	let now = $state(new Date());
 	let modalOpen = $state(false);
 	let viewOpen = $state(false); // 3D model viewer overlay
+
+	// Fit-to-screen: the board is laid out at a fixed design width then scaled so the WHOLE thing fills
+	// the kiosk screen with no scrolling — as large as it can be while everything stays visible.
+	const DESIGN_W = 1440;
+	let wrap: HTMLDivElement;
+	let scale = $state(1);
+	function fit() {
+		if (!wrap) return;
+		const w = wrap.scrollWidth || DESIGN_W;
+		const h = wrap.scrollHeight;
+		if (!h) return;
+		scale = Math.max(0.25, Math.min(window.innerWidth / w, window.innerHeight / h));
+	}
+
 	onMount(() => {
 		const clock = setInterval(() => (now = new Date()), 1000);
 		// Live board — but never yank the data out from under an open editor / 3D view.
 		const poll = setInterval(() => { if (!modalOpen && !viewOpen) invalidateAll(); }, 5000);
-		return () => { clearInterval(clock); clearInterval(poll); };
+		fit();
+		const onResize = () => fit();
+		window.addEventListener('resize', onResize);
+		// Refit whenever the content's natural size changes (a printer starts/finishes, filament edits…).
+		const ro = new ResizeObserver(() => fit());
+		if (wrap) ro.observe(wrap);
+		return () => { clearInterval(clock); clearInterval(poll); window.removeEventListener('resize', onResize); ro.disconnect(); };
 	});
 
 	// ── 3D model viewer (tap the print image on the board) ─────────────────────
@@ -43,6 +63,14 @@
 	}
 
 	const printers = $derived(data.printers);
+	// Column count tuned to the printer count so cards stay large but the board still fits.
+	const cols = $derived.by(() => {
+		const n = printers.length || 1;
+		if (n <= 2) return n;
+		if (n <= 4) return 2;
+		if (n <= 9) return 3;
+		return 4;
+	});
 
 	// ── Filament editing ─────────────────────────────────────────────────────
 	const FIL_TYPES = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PLA-CF', 'PETG-CF', 'PC', 'PA', 'PVA', 'Support'];
@@ -112,13 +140,18 @@
 		try { return new URL(data.appUrl).host; } catch { return data.appUrl; }
 	});
 
+	// Re-fit whenever the live board data changes (a print starts/finishes, filament edited, etc.).
+	$effect(() => { printers; if (wrap) requestAnimationFrame(fit); });
+
 	const thumb = (modelId: string | null, hasThumb: unknown) =>
 		modelId && hasThumb ? `/files/${modelId}/thumb${data.kiosk ? `?kiosk=${data.kioskToken}` : ''}` : null;
 </script>
 
 <svelte:head><title>Lab Monitor · {data.orgName}</title></svelte:head>
 
-<div class="antiburn min-h-screen bg-soft-paper px-5 py-5 sm:px-8">
+<div class="fixed inset-0 flex items-center justify-center overflow-hidden bg-soft-paper">
+<div style="transform: scale({scale}); transform-origin: center center;">
+<div bind:this={wrap} class="antiburn" style="width: {DESIGN_W}px; padding: 32px;">
 	<!-- Header -->
 	<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="flex items-center gap-4">
@@ -158,7 +191,7 @@
 	</header>
 
 	<!-- Printer board -->
-	<div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+	<div class="grid gap-5" style="grid-template-columns: repeat({cols}, minmax(0, 1fr));">
 		{#each printers as p}
 			{@const color = (p.colorRequest ?? [])[0]?.colorHex}
 			{@const img = thumb(p.modelId, p.hasThumb)}
@@ -342,6 +375,8 @@
 	{#if printers.length === 0}
 		<div class="card p-12 text-center text-xl text-muted-ink">No printers yet. Add them in Admin → Printers.</div>
 	{/if}
+</div>
+</div>
 </div>
 
 <!-- Filament editor (kept outside .antiburn so the burn-in transform can't offset the fixed modal) -->
