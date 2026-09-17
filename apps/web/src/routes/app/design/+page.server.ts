@@ -15,14 +15,22 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals }) => {
 	const user = locals.user!;
 
-	// Distinct colors currently loaded across the lab's enabled printers.
+	// Every loaded slot across the lab's enabled, cloud-printable printers, with the owning printer's
+	// live status so we can tell "available now" (a FREE printer has it) from "in use" (only busy
+	// printers have it → the job will queue). An AMS printer runs one job at a time, so when it's busy
+	// EVERY color in its AMS is in use.
 	const rows = await db
 		.select({
+			printerId: printers.id,
+			online: printers.online,
+			status: printers.status,
+			currentJobId: printers.currentJobId,
+			model: printers.model,
+			amsUnitId: amsUnits.id,
+			amsIndex: amsUnits.amsIndex,
 			colorHex: amsSlots.colorHex,
 			colorName: amsSlots.colorName,
-			filamentType: amsSlots.filamentType,
-			online: printers.online,
-			model: printers.model
+			filamentType: amsSlots.filamentType
 		})
 		.from(amsSlots)
 		.innerJoin(amsUnits, eq(amsSlots.amsUnitId, amsUnits.id))
@@ -38,23 +46,44 @@ export const load: PageServerLoad = async ({ locals }) => {
 			)
 		);
 
-	// Group unique color+type, tracking availability + which models can print it.
-	const map = new Map<string, { colorHex: string; colorName: string | null; filamentType: string; available: boolean; models: Set<string> }>();
+	const colorKey = (filamentType: string | null, hex: string) => `${filamentType ?? 'PLA'}|${hex.toLowerCase()}`;
+	// A printer is FREE for a new job when it's online, idle, and not holding a job.
+	const isFree = (r: (typeof rows)[number]) => r.online && !r.currentJobId && r.status === 'idle';
+
+	// Group unique color+type. available = a free printer has it (green); inUse = only busy printers
+	// have it right now (red → will queue); otherwise it's offline/not loaded.
+	const map = new Map<string, { colorHex: string; colorName: string | null; filamentType: string; available: boolean; busy: boolean; models: Set<string> }>();
 	for (const r of rows) {
 		if (!r.colorHex) continue;
-		const key = `${r.filamentType}|${r.colorHex.toLowerCase()}`;
-		const e = map.get(key) ?? {
-			colorHex: r.colorHex,
-			colorName: r.colorName,
-			filamentType: r.filamentType ?? 'PLA',
-			available: false,
-			models: new Set<string>()
-		};
-		if (r.online) e.available = true;
+		const key = colorKey(r.filamentType, r.colorHex);
+		const e = map.get(key) ?? { colorHex: r.colorHex, colorName: r.colorName, filamentType: r.filamentType ?? 'PLA', available: false, busy: false, models: new Set<string>() };
+		if (isFree(r)) e.available = true;
+		else if (r.online) e.busy = true;
 		if (r.model) e.models.add(r.model);
 		map.set(key, e);
 	}
-	const colors = [...map.values()].map((c) => ({ ...c, models: [...c.models] }));
+	const colors = [...map.values()].map((c) => ({
+		colorHex: c.colorHex,
+		colorName: c.colorName,
+		filamentType: c.filamentType,
+		models: [...c.models],
+		available: c.available,
+		inUse: !c.available && c.busy // has it, but every printer with it is busy → will queue
+	}));
+
+	// AMS groups: the colors that physically coexist in one AMS unit (real AMS only, not the external
+	// spool at index 254). A multi-color print must draw all its colors from a SINGLE group. Each group
+	// carries whether its printer is free so the UI can say "available" vs "will queue".
+	const amsMap = new Map<string, { free: boolean; online: boolean; keys: Set<string> }>();
+	for (const r of rows) {
+		if (!r.colorHex || r.amsIndex === 254) continue;
+		const g = amsMap.get(r.amsUnitId) ?? { free: false, online: false, keys: new Set<string>() };
+		g.keys.add(colorKey(r.filamentType, r.colorHex));
+		if (isFree(r)) g.free = true;
+		if (r.online) g.online = true;
+		amsMap.set(r.amsUnitId, g);
+	}
+	const amsGroups = [...amsMap.values()].map((g) => ({ free: g.free, online: g.online, colorKeys: [...g.keys] }));
 
 	const models_ = await db
 		.select({ model: printers.model })
@@ -64,6 +93,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 	return {
 		colors,
+		amsGroups,
 		printerModels,
 		approvalMode: user.approvalMode,
 		queueEnabled: user.queueEnabled,

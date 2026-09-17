@@ -6,7 +6,7 @@
 
 	type V3 = { x: number; y: number; z: number };
 	type Stats = { bbox: V3; volumeMm3: number; triangles: number; objects: number };
-	type LabColor = { colorHex: string; colorName?: string | null; filamentType: string; available?: boolean };
+	type LabColor = { colorHex: string; colorName?: string | null; filamentType: string; available?: boolean; inUse?: boolean };
 	type ObjRow = { id: string; name: string; color: LabColor };
 
 	let {
@@ -18,8 +18,9 @@
 		embedded = false,
 		insetRight = 0,
 		onstats,
+		oncolors,
 		onerror
-	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; insetRight?: number; onstats?: (s: Stats) => void; onerror?: (msg: string) => void } = $props();
+	}: { colorHex?: string; plate?: V3; labColors?: LabColor[]; defaultColor?: LabColor | null; reference?: boolean; embedded?: boolean; insetRight?: number; onstats?: (s: Stats) => void; oncolors?: (cols: { filamentType: string; colorHex: string; colorName?: string }[]) => void; onerror?: (msg: string) => void } = $props();
 
 	// The 3D engine loads async in onMount; files chosen before it's ready are queued here.
 	let ready = false;
@@ -476,6 +477,7 @@
 		};
 	}
 	function emitStats() {
+		oncolors?.(getColorRequest());
 		if (!objects.length) { onstats?.({ bbox: { x: 0, y: 0, z: 0 }, volumeMm3: 0, triangles: 0, objects: 0 }); return; }
 		const box = new THREE.Box3(); let tris = 0, vol = 0;
 		for (const o of objects) { const m = meshes.get(o.id); if (!m) continue; box.expandByObject(m); tris += m.geometry.getAttribute('position').count / 3; vol += signedVolume(m.geometry) * Math.abs(m.scale.x * m.scale.y * m.scale.z); }
@@ -589,6 +591,7 @@
 			if (m && !m.userData.custom) { m.material.color = new THREE.Color(c.colorHex); o.color = c; }
 		}
 		objects = [...objects];
+		oncolors?.(getColorRequest());
 	}
 	/** Set one object's color (marks it user-set so the default picker won't override it). */
 	function setObjectColor(id: string, c: LabColor) {
@@ -596,6 +599,7 @@
 		if (m) { m.material.color = new THREE.Color(c.colorHex); m.userData.custom = true; }
 		objects = objects.map((o) => (o.id === id ? { ...o, color: c } : o));
 		paletteOpenId = null;
+		oncolors?.(getColorRequest());
 	}
 	type Col = { filamentType: string; colorHex: string; colorName?: string };
 	const asReq = (c: LabColor): Col => ({ filamentType: c.filamentType, colorHex: c.colorHex, colorName: c.colorName ?? undefined });
@@ -859,7 +863,9 @@
 				<span class="mx-1 h-4 w-px bg-warm-200"></span>
 				{#if brush.kind === 'color'}
 					{#each labColors as c, i}
-						<button type="button" title={c.colorName ?? c.colorHex} onclick={() => (brush.colorIdx = i)} class="h-6 w-6 rounded border-2 hover:scale-110 {brush.colorIdx === i ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}"></button>
+						<button type="button" title="{c.colorName ?? c.colorHex}{c.available ? ' · available' : c.inUse ? ' · in use (will queue)' : ' · offline'}" onclick={() => (brush.colorIdx = i)} class="relative h-6 w-6 rounded border-2 hover:scale-110 {brush.colorIdx === i ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+							{#if c.available}<span class="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white bg-success"></span>{:else if c.inUse}<span class="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white bg-danger"></span>{/if}
+						</button>
 					{/each}
 				{:else if brush.kind === 'support'}
 					<button type="button" class="rounded px-2 py-1 {brush.sub === 1 ? 'bg-warm-200' : 'hover:bg-warm-100'}" onclick={() => (brush.sub = 1)}>Enforce</button>
@@ -955,8 +961,10 @@
 				{#if paletteOpenId === o.id && labColors.length}
 					<div class="mb-1 flex flex-wrap gap-1 rounded-lg bg-warm-50 p-1.5">
 						{#each labColors as c}
-							<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}" onclick={() => setObjectColor(o.id, c)}
-								class="h-6 w-6 rounded border-2 hover:scale-110 {o.color.colorHex === c.colorHex && o.color.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}"></button>
+							<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? ' · available' : c.inUse ? ' · in use (will queue)' : ' · offline'}" onclick={() => setObjectColor(o.id, c)}
+								class="relative h-6 w-6 rounded border-2 hover:scale-110 {o.color.colorHex === c.colorHex && o.color.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{c.colorHex}">
+								{#if c.available}<span class="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white bg-success"></span>{:else if c.inUse}<span class="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white bg-danger"></span>{/if}
+							</button>
 						{/each}
 					</div>
 				{/if}

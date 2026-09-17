@@ -31,6 +31,31 @@
 	}
 	let name = $state('');
 	let selected = $state<LabColor | null>(data.colors.find((c) => c.available) ?? data.colors[0] ?? null);
+	let anyColor = $state(false); // "no preference" — let the lab pick the most-available color
+
+	// ── Color availability ───────────────────────────────────────────────────
+	// The editor reports the colors actually on the model (1 = single, >1 = multicolor). We combine
+	// that with the lab's live AMS availability to tell the student whether their print goes now or
+	// queues, and — for multicolor — whether the chosen colors all live in one AMS.
+	let usedColors = $state<{ filamentType: string; colorHex: string; colorName?: string }[]>([]);
+	const keyOf = (c: { filamentType: string; colorHex: string }) => `${c.filamentType}|${c.colorHex.toLowerCase()}`;
+	const colorByKey = $derived(new Map(data.colors.map((c) => [keyOf(c), c])));
+	const printColors = $derived(anyColor ? [] : usedColors.length ? usedColors : selected ? [selected] : []);
+	const colorStatus = $derived.by(() => {
+		if (anyColor || printColors.length === 0) return { kind: 'ok' as const };
+		const keys = [...new Set(printColors.map(keyOf))];
+		if (keys.length <= 1) {
+			const c = colorByKey.get(keys[0]);
+			if (!c) return { kind: 'offline' as const };
+			if (c.available) return { kind: 'available' as const };
+			return { kind: c.inUse ? 'queue' : 'offline' } as const;
+		}
+		// Multicolor: every color must live in a single AMS unit.
+		const fit = data.amsGroups.filter((g) => keys.every((k) => g.colorKeys.includes(k)));
+		if (fit.length === 0) return { kind: 'unfit' as const };
+		if (fit.some((g) => g.free)) return { kind: 'available' as const };
+		return { kind: fit.some((g) => g.online) ? 'queue' : 'offline' } as const;
+	});
 	let quality = $state(0.2); // layer height
 	let infill = $state(15); // infill density %
 	let supports = $state(false);
@@ -149,7 +174,6 @@
 	// overlay reliably lifts once a model is in the editor.
 	let objectCount = $state(0);
 	let editorError = $state<string | null>(null);
-	let anyColor = $state(false); // "no preference" — let the lab pick the most-available color
 	const hasModel = $derived(objectCount > 0);
 	const hasColor = $derived(anyColor || !!selected);
 	const canSlice = $derived(hasModel && hasColor);
@@ -193,7 +217,7 @@
 	<!-- Editor fills the screen -->
 	<div class="absolute inset-0" role="button" tabindex="0"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
-		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#1E2F66'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={!isMobile && printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} onerror={(m) => (editorError = m)} />
+		<StudioEditor bind:this={editor} colorHex={selected?.colorHex ?? '#1E2F66'} labColors={data.colors} defaultColor={selected} reference={showRef} embedded insetRight={!isMobile && printOpen && !form?.success ? PANEL_W : 0} {plate} onstats={(s) => { stats = s; objectCount = s.objects; invalidatePreview(); }} oncolors={(cols) => (usedColors = cols)} onerror={(m) => (editorError = m)} />
 		{#if !hasModel}
 			<button type="button" onclick={() => fileInput?.click()}
 				class="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-3 {dragOver ? 'bg-spark-soft/40' : ''} transition-colors">
@@ -302,13 +326,23 @@
 								</button>
 								<span class="h-6 w-px bg-warm-200"></span>
 								{#each data.colors as c}
-									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? '' : ' (offline)'}" onclick={() => { selected = c; anyColor = false; invalidatePreview(); }}
+									<button type="button" title="{c.colorName ?? c.colorHex} · {c.filamentType}{c.available ? ' · available now' : c.inUse ? ' · in use (will queue)' : ' · offline'}" onclick={() => { selected = c; anyColor = false; invalidatePreview(); }}
 										class="relative h-9 w-9 rounded-lg border-2 transition-transform hover:scale-110 {!anyColor && selected?.colorHex === c.colorHex && selected?.filamentType === c.filamentType ? 'border-ink' : 'border-warm-300'}" style="background:{swatch(c.colorHex)}">
-										{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success"></span>{/if}
+										{#if c.available}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-success" title="Available now"></span>
+										{:else if c.inUse}<span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-danger" title="In use — will queue"></span>{/if}
 									</button>
 								{/each}
 							</div>
 							<p class="mt-1.5 text-xs text-muted-ink">{anyColor ? 'We’ll route it to whichever printer has the fullest spool loaded.' : 'Recolor individual objects with the paint tools in the editor.'}</p>
+							{#if colorStatus.kind === 'queue'}
+								<p class="mt-2 flex items-start gap-1.5 rounded-lg bg-danger/5 px-2.5 py-1.5 text-xs font-medium text-danger"><span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-danger"></span> Your print will be queued up — the printer that prints with this color is in use right now.</p>
+							{:else if colorStatus.kind === 'unfit'}
+								<p class="mt-2 rounded-lg bg-warning/10 px-2.5 py-1.5 text-xs font-medium text-[#9c5a00]">For a multi-color print, every color has to be loaded in one printer's AMS. Some of these aren't in the same AMS, so it can't print as a single job — pick colors that share one AMS.</p>
+							{:else if colorStatus.kind === 'offline'}
+								<p class="mt-2 rounded-lg bg-warm-100 px-2.5 py-1.5 text-xs text-muted-ink">This color isn't loaded on an online printer right now — your print will wait in the queue until it is.</p>
+							{:else if colorStatus.kind === 'available'}
+								<p class="mt-2 flex items-center gap-1.5 text-xs font-medium text-success"><span class="h-2 w-2 rounded-full bg-success"></span> Available now — prints as soon as it's your turn.</p>
+							{/if}
 						{/if}
 					</div>
 
