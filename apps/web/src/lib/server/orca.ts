@@ -347,6 +347,8 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 	const args = [
 		'-a',
 		loc.apprun,
+		'--debug',
+		'2', // verbose OrcaSlicer logging so failures explain themselves in the captured output
 		'--load-settings',
 		`${machinePath};${overridePath}`,
 		'--load-filaments',
@@ -369,7 +371,14 @@ export async function orcaSlice(modelPath: string, s: OrcaSettings = {}): Promis
 			const err = /"error_string"\s*:\s*"([^"]*)"/.exec(resultJson)?.[1] ?? `return_code ${rc}`;
 			// Surface OrcaSlicer's own log (object size, bed bounds, arrange result) so failures are
 			// diagnosable instead of just the one-line error_string.
-			console.error(`[orca] slice failed (rc ${rc}): ${err}\n--- orca args ---\n${args.join(' ')}\n--- result.json ---\n${resultJson.slice(0, 1500)}\n--- orca output HEAD ---\n${out.slice(0, 3000)}\n--- orca output TAIL ---\n${out.slice(-2500)}`);
+			// Pull the most useful lines out of the (verbose) OrcaSlicer log: anything mentioning the
+			// object/plate/bed bounds, arrange, or the failure.
+			const hot = out
+				.split('\n')
+				.filter((l) => /object|plate|bed|arrange|inside|exclud|volume|bounding|out of|error|fail|invalid|width|depth|print_?able/i.test(l))
+				.slice(-60)
+				.join('\n');
+			console.error(`[orca] slice failed (rc ${rc}): ${err}\n--- orca args ---\n${args.join(' ')}\n--- relevant orca log ---\n${hot}\n--- orca output tail ---\n${out.slice(-1500)}`);
 			throw new Error(`OrcaSlicer failed: ${err}`);
 		}
 	}
