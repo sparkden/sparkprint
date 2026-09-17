@@ -46,6 +46,7 @@ type LoadedSlot = {
 	slotIndex: number;
 	filamentType: string | null;
 	colorHex: string | null;
+	colorName: string | null;
 	empty: boolean;
 	remainingPct: number | null;
 };
@@ -65,12 +66,22 @@ function matchSlot(req: ColorRequest, slots: LoadedSlot[]): LoadedSlot | null {
 		}
 		return best;
 	}
+	const typeOk = (s: LoadedSlot) => !req.filamentType || !s.filamentType || s.filamentType.toUpperCase() === req.filamentType.toUpperCase();
+
+	// 1) Prefer an EXACT color-name match. Two loaded colors can be visually close (e.g. dark navy vs
+	// black), so honour the exact filament the student picked by name before falling back to nearest
+	// hue — otherwise a black request could grab a near-black navy slot.
+	if (req.colorName) {
+		const want = req.colorName.trim().toLowerCase();
+		const named = slots.find((s) => !s.empty && s.colorHex && typeOk(s) && (s.colorName ?? '').trim().toLowerCase() === want);
+		if (named) return named;
+	}
+
+	// 2) Otherwise the nearest colour within tolerance.
 	let best: LoadedSlot | null = null;
 	let bestDist = Infinity;
 	for (const s of slots) {
-		if (s.empty || !s.colorHex) continue;
-		if (req.filamentType && s.filamentType && s.filamentType.toUpperCase() !== req.filamentType.toUpperCase())
-			continue;
+		if (s.empty || !s.colorHex || !typeOk(s)) continue;
 		const dist = colorDistance(req.colorHex, s.colorHex);
 		if (dist <= COLOR_TOLERANCE && dist < bestDist) {
 			best = s;
@@ -142,6 +153,7 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 				slotIndex: amsSlots.slotIndex,
 				filamentType: amsSlots.filamentType,
 				colorHex: amsSlots.colorHex,
+				colorName: amsSlots.colorName,
 				empty: amsSlots.empty,
 				remainingPct: amsSlots.remainingPct
 			})
@@ -156,6 +168,10 @@ export async function dispatch(jobId: string): Promise<'printing' | 'queued'> {
 			if (!slot) {
 				ok = false;
 				break;
+			}
+			const reqC = requests[i];
+			if (!reqC.any && reqC.colorHex && slot.colorHex && colorDistance(reqC.colorHex, slot.colorHex) > 8) {
+				console.log(`[dispatch] color substitution on ${p.name}: requested ${reqC.colorName ?? reqC.colorHex} → loaded ${slot.colorName ?? slot.colorHex} (AMS ${slot.amsIndex + 1}·${slot.slotIndex + 1})`);
 			}
 			mapping.push({
 				filamentIndex: i,
