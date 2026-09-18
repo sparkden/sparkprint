@@ -23,20 +23,22 @@
 	let pinModalOpen = $state(false);
 	let pinInput = $state('');
 	let pinError = $state('');
+	let pinNote = $state(''); // extra guidance shown in the PIN prompt (e.g. students cancel from their account)
 	let pinForm: HTMLFormElement | null = null;
 	// use:enhance wrapper: on the kiosk, require the PIN before a guarded action goes through. Signed-in
-	// staff and (guard-off) submit normally. `onSuccess` runs after a successful action (e.g. close a modal).
-	function pinEnhance(onSuccess?: () => void) {
+	// staff and (guard-off) submit normally. `onSuccess` runs after a successful action (e.g. close a
+	// modal); `note` shows extra guidance in the PIN prompt.
+	function pinEnhance(onSuccess?: () => void, note = '') {
 		return (arg: { formElement: HTMLFormElement; formData: FormData; cancel: () => void }) => {
 			if (data.guardActions && data.kiosk) {
 				const p = pendingPin.get(arg.formElement);
-				if (!p) { arg.cancel(); pinForm = arg.formElement; pinInput = ''; pinError = ''; pinModalOpen = true; return; }
+				if (!p) { arg.cancel(); pinForm = arg.formElement; pinInput = ''; pinError = ''; pinNote = note; pinModalOpen = true; return; }
 				arg.formData.set('pin', p);
 				pendingPin.delete(arg.formElement);
 			}
 			return async ({ update, result }: { update: (o?: { reset?: boolean }) => Promise<void>; result: { type: string; data?: Record<string, unknown> } }) => {
 				if (result?.type === 'failure' && result.data?.pinError) {
-					pinForm = arg.formElement; pinInput = ''; pinError = 'Wrong PIN — try again.'; pinModalOpen = true;
+					pinForm = arg.formElement; pinInput = ''; pinError = 'Wrong PIN — try again.'; pinNote = note; pinModalOpen = true;
 					return;
 				}
 				await update({ reset: false });
@@ -44,6 +46,11 @@
 			};
 		};
 	}
+	const cancelNote = $derived.by(() => {
+		let h = data.appUrl;
+		try { h = new URL(data.appUrl).host; } catch { /* keep as-is */ }
+		return `If this is your print, cancel it from your account instead — open ${h} on your phone and go to My prints. Staff can enter the PIN to stop it here.`;
+	});
 	function submitPin() {
 		if (!pinForm || !pinInput.trim()) return;
 		pendingPin.set(pinForm, pinInput.trim());
@@ -316,7 +323,7 @@
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-secondary btn-lg w-full"><Icon name="check" size={20} /> Done</button>
 						</form>
-						<form method="POST" action="?/stop" use:enhance={pinEnhance()} onsubmit={(e) => { if (!confirm('Stop this print on the printer?')) e.preventDefault(); }}>
+						<form method="POST" action="?/stop" use:enhance={pinEnhance(undefined, cancelNote)} onsubmit={(e) => { if (!data.kiosk && !confirm('Stop this print on the printer?')) e.preventDefault(); }}>
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-ghost btn-lg text-danger"><Icon name="x" size={20} /> Stop</button>
@@ -347,7 +354,7 @@
 					<div class="mt-8 text-center">
 						<p class="text-3xl font-bold text-spark-deep">Starting…</p>
 						<p class="mt-2 truncate text-lg text-muted-ink">{p.modelName ?? p.jobName ?? 'Sending file to the printer'}</p>
-						<form method="POST" action="?/stop" use:enhance={pinEnhance()} class="mt-4">
+						<form method="POST" action="?/stop" use:enhance={pinEnhance(undefined, cancelNote)} class="mt-4">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-ghost btn-lg text-danger">Cancel</button>
@@ -552,7 +559,11 @@
 	<div class="fixed inset-0 z-[85] flex items-center justify-center bg-ink/70 p-4">
 		<div class="card w-full max-w-xs p-6 text-center">
 			<p class="text-lg font-semibold text-ink">Enter PIN</p>
-			<p class="mt-1 text-sm text-muted-ink">This action needs the lab PIN.</p>
+			{#if pinNote}
+				<p class="mt-2 rounded-lg bg-warm-100 px-3 py-2 text-left text-sm text-soft-ink">{pinNote}</p>
+			{:else}
+				<p class="mt-1 text-sm text-muted-ink">This action needs the lab PIN.</p>
+			{/if}
 			<!-- svelte-ignore a11y_autofocus -->
 			<input type="password" inputmode="numeric" autocomplete="off" autofocus bind:value={pinInput} placeholder="PIN"
 				class="input mt-4 text-center text-2xl tracking-[0.4em]" onkeydown={(e) => { if (e.key === 'Enter') submitPin(); }} />
