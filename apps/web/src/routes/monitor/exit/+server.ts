@@ -16,7 +16,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const kioskOk = !!(await kioskOrgId(kiosk ?? null));
 	if (!isAdmin && !kioskOk) throw error(403, 'Not allowed.');
 
-	const expected = (await getSetting('kiosk.exitPin')) || '2010';
+	const expected = (await getSetting('kiosk.pin')) || (await getSetting('kiosk.exitPin')) || '2010';
 	if (String(pin ?? '').trim() !== expected) throw error(401, 'Wrong PIN.');
 
 	// Mark disabled + stop the OS kiosk service. Detached + unref'd so it survives this request (and

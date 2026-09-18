@@ -103,6 +103,21 @@
 		</div>
 
 		<div class="card space-y-4 p-6">
+			<h2 class="text-lg font-semibold">Kiosk security</h2>
+			<Toggle
+				name="kioskGuardActions"
+				checked={data.kioskGuardActions}
+				label="Require PIN for kiosk actions"
+				description="On the lab board, dangerous actions (approve a print, cancel/stop, change or unload filament, change speed) ask for the PIN. Turn off to allow them without a PIN."
+			/>
+			<div class="max-w-[12rem]">
+				<label class="label" for="kpin">Kiosk PIN</label>
+				<input class="input tracking-[0.3em]" id="kpin" name="kioskPin" inputmode="numeric" value={data.kioskPin} placeholder="2010" />
+				<p class="mt-1 text-xs text-muted-ink">4–8 digits. Also used to exit kiosk mode.</p>
+			</div>
+		</div>
+
+		<div class="card space-y-4 p-6">
 			<h2 class="text-lg font-semibold">Cost accounting</h2>
 			<div class="max-w-[12rem]">
 				<label class="label" for="cost">Material cost ($/kg)</label>

@@ -3,9 +3,9 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
 import { printers, printJobs, users, models, orgs, amsUnits, amsSlots } from '$lib/server/db/schema';
-import { checkoutJob, cancelJob, markDone } from '$lib/server/jobs';
+import { checkoutJob, cancelJob, markDone, approveJob, rejectJob } from '$lib/server/jobs';
 import { manager } from '$lib/server/bambu/manager';
-import { kioskOrgId } from '$lib/server/settings';
+import { kioskOrgId, getSetting } from '$lib/server/settings';
 import { getWeather } from '$lib/server/weather';
 import { qrSvg, DEFAULT_APP_URL } from '$lib/server/qr';
 import type { Actions, PageServerLoad } from './$types';
@@ -33,6 +33,15 @@ async function actor(locals: App.Locals, url: URL, fd?: FormData): Promise<{ org
 	}
 	const k = await kioskOrg(url.searchParams.get('kiosk') || String(fd?.get('kiosk') || ''));
 	return k ? { orgId: k.orgId } : null;
+}
+
+// Dangerous board actions require the kiosk PIN — but only from the no-login kiosk, and only while
+// the "require PIN" guard is on. A signed-in staff member is already authenticated, so no PIN.
+async function pinOk(locals: App.Locals, fd: FormData): Promise<boolean> {
+	if (locals.user && STAFF_ROLES.includes(locals.user.role)) return true;
+	if ((await getSetting('kiosk.guardActions')) === '0') return true; // guard disabled
+	const expected = (await getSetting('kiosk.pin')) || (await getSetting('kiosk.exitPin')) || '2010';
+	return String(fd.get('pin') ?? '').trim() === expected;
 }
 
 // Fullscreen lab monitor for the shared lab computer. Staff (teacher/admin/owner) can view + manage
@@ -127,9 +136,32 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		.orderBy(desc(printJobs.priority), asc(printJobs.createdAt))
 		.limit(12);
 
+	// Prints waiting for a staff review — shown on the board so they can be approved (PIN) on the spot.
+	const pending = await db
+		.select({
+			id: printJobs.id,
+			name: printJobs.name,
+			ownerName: users.name,
+			grams: printJobs.estimatedGrams,
+			timeSec: printJobs.estimatedTimeSec,
+			modelId: printJobs.modelId,
+			modelName: models.name,
+			hasThumb: models.thumbnailKey,
+			colorRequest: printJobs.colorRequest,
+			createdAt: printJobs.createdAt
+		})
+		.from(printJobs)
+		.leftJoin(users, eq(printJobs.userId, users.id))
+		.leftJoin(models, eq(printJobs.modelId, models.id))
+		.where(and(eq(printJobs.orgId, user.orgId), eq(printJobs.status, 'pending_approval')))
+		.orderBy(asc(printJobs.createdAt))
+		.limit(12);
+
 	return {
 		printers: withFilament,
 		queue,
+		pending,
+		guardActions: (await getSetting('kiosk.guardActions')) !== '0',
 		orgName: user.orgName,
 		isStaff: !kiosk && ['owner', 'admin', 'teacher'].includes(user.role),
 		kiosk,
@@ -149,11 +181,30 @@ export const actions: Actions = {
 		const r = await checkoutJob(String(fd.get('jobId')), a.orgId, a.actorId);
 		return r.ok ? { success: true } : fail(400, { error: r.error });
 	},
+	// Approve a print waiting for review → releases it to the queue. PIN-guarded on the kiosk.
+	approve: async ({ request, locals, url }) => {
+		const fd = await request.formData();
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
+		const r = await approveJob(String(fd.get('jobId')), a.orgId, a.actorId ?? null);
+		return r.ok ? { success: true } : fail(400, { error: r.error });
+	},
+	// Reject a print waiting for review. PIN-guarded on the kiosk.
+	reject: async ({ request, locals, url }) => {
+		const fd = await request.formData();
+		const a = await actor(locals, url, fd);
+		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
+		const r = await rejectJob(String(fd.get('jobId')), a.orgId, a.actorId ?? null, 'Rejected at the lab board');
+		return r.ok ? { success: true } : fail(400, { error: r.error });
+	},
 	// Force a print completed + free the printer (telemetry missed the finish, or confirming done).
 	complete: async ({ request, locals, url }) => {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const r = await markDone(String(fd.get('jobId')), a.orgId, a.actorId);
 		return r.ok ? { success: true } : fail(400, { error: r.error });
 	},
@@ -162,6 +213,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const jobId = String(fd.get('jobId'));
 		const [job] = await db.select({ printerId: printJobs.printerId }).from(printJobs).where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, a.orgId))).limit(1);
 		if (job?.printerId) { try { await manager().stop(job.printerId); } catch { /* offline */ } }
@@ -174,6 +226,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const parsed = slotSchema.safeParse({
 			slotId: fd.get('slotId'),
 			empty: fd.get('empty') === 'on' || fd.get('empty') === 'true',
@@ -213,6 +266,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const printerId = String(fd.get('printerId'));
 		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
 		if (!printer) return fail(404, { error: 'Printer not found' });
@@ -243,6 +297,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const level = Number(fd.get('level'));
 		if (![1, 2, 3, 4].includes(level)) return fail(400, { error: 'Invalid speed' });
 		const jobId = String(fd.get('jobId'));
@@ -276,6 +331,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const a = await actor(locals, url, fd);
 		if (!a) return fail(403, { error: 'Only staff or the lab kiosk can manage the board.' });
+		if (!(await pinOk(locals, fd))) return fail(401, { pinError: true, error: 'Wrong PIN.' });
 		const printerId = String(fd.get('printerId'));
 		const [printer] = await db.select({ id: printers.id }).from(printers).where(and(eq(printers.id, printerId), eq(printers.orgId, a.orgId))).limit(1);
 		if (!printer) return fail(404, { error: 'Printer not found' });

@@ -18,6 +18,39 @@
 	let exitErr = $state('');
 	let exitBusy = $state(false);
 	let exited = $state(false);
+	// ── PIN gate for dangerous board actions (kiosk only, when the guard is on) ─
+	const pendingPin = new Map<HTMLFormElement, string>();
+	let pinModalOpen = $state(false);
+	let pinInput = $state('');
+	let pinError = $state('');
+	let pinForm: HTMLFormElement | null = null;
+	// use:enhance wrapper: on the kiosk, require the PIN before a guarded action goes through. Signed-in
+	// staff and (guard-off) submit normally. `onSuccess` runs after a successful action (e.g. close a modal).
+	function pinEnhance(onSuccess?: () => void) {
+		return (arg: { formElement: HTMLFormElement; formData: FormData; cancel: () => void }) => {
+			if (data.guardActions && data.kiosk) {
+				const p = pendingPin.get(arg.formElement);
+				if (!p) { arg.cancel(); pinForm = arg.formElement; pinInput = ''; pinError = ''; pinModalOpen = true; return; }
+				arg.formData.set('pin', p);
+				pendingPin.delete(arg.formElement);
+			}
+			return async ({ update, result }: { update: (o?: { reset?: boolean }) => Promise<void>; result: { type: string; data?: Record<string, unknown> } }) => {
+				if (result?.type === 'failure' && result.data?.pinError) {
+					pinForm = arg.formElement; pinInput = ''; pinError = 'Wrong PIN — try again.'; pinModalOpen = true;
+					return;
+				}
+				await update({ reset: false });
+				if (result?.type === 'success') onSuccess?.();
+			};
+		};
+	}
+	function submitPin() {
+		if (!pinForm || !pinInput.trim()) return;
+		pendingPin.set(pinForm, pinInput.trim());
+		const f = pinForm; pinForm = null; pinModalOpen = false;
+		f.requestSubmit();
+	}
+
 	async function doExit() {
 		exitBusy = true; exitErr = '';
 		try {
@@ -54,7 +87,7 @@
 	onMount(() => {
 		const clock = setInterval(() => (now = new Date()), 1000);
 		// Live board — but never yank the data out from under an open editor / 3D view.
-		const poll = setInterval(() => { if (!modalOpen && !viewOpen && !exitOpen) invalidateAll(); }, 5000);
+		const poll = setInterval(() => { if (!modalOpen && !viewOpen && !exitOpen && !pinModalOpen) invalidateAll(); }, 5000);
 		fit();
 		const onResize = () => fit();
 		window.addEventListener('resize', onResize);
@@ -70,17 +103,17 @@
 	let viewName = $state('');
 	let viewColor = $state('#1E2F66');
 	let viewLoading = $state(false);
-	async function open3d(p: (typeof printers)[number]) {
-		if (!p.modelId) return;
-		viewName = p.modelName ?? p.jobName ?? 'Print';
-		viewColor = (p.colorRequest ?? [])[0]?.colorHex ?? '#1E2F66';
+	async function open3d(modelId: string | null, name: string, colorHex?: string | null) {
+		if (!modelId) return;
+		viewName = name;
+		viewColor = colorHex ?? '#1E2F66';
 		viewFile = null;
 		viewOpen = true;
 		viewLoading = true;
 		try {
-			const res = await fetch(`/files/${p.modelId}/model${data.kiosk ? `?kiosk=${data.kioskToken}` : ''}`);
+			const res = await fetch(`/files/${modelId}/model${data.kiosk ? `?kiosk=${data.kioskToken}` : ''}`);
 			if (!res.ok) throw new Error('load failed');
-			const fmt = res.headers.get('x-model-format') ?? p.modelFormat ?? 'stl';
+			const fmt = res.headers.get('x-model-format') ?? 'stl';
 			viewFile = new File([await res.blob()], `model.${fmt}`);
 		} catch {
 			viewFile = null;
@@ -240,7 +273,7 @@
 				{#if p.status === 'printing'}
 					<div class="mt-5 flex gap-4">
 						{#if p.modelId}
-							<button type="button" onclick={() => open3d(p)} title="Tap for a 3D view"
+							<button type="button" onclick={() => open3d(p.modelId, p.modelName ?? p.jobName ?? 'Print', (p.colorRequest ?? [])[0]?.colorHex)} title="Tap for a 3D view"
 								class="group relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-warm-200 bg-[#2b2b2b] ring-spark transition hover:ring-2">
 								{#if img}<img src={img} alt="" class="h-full w-full object-cover" />{/if}
 								<span class="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 bg-ink/60 py-1 text-xs font-semibold text-white"><Icon name="box" size={14} /> 3D</span>
@@ -266,7 +299,7 @@
 					<!-- Live print-speed control -->
 					<div class="mt-4">
 						<span class="text-sm font-semibold uppercase tracking-wide text-muted-ink">Speed</span>
-						<form method="POST" action="?/setSpeed" use:enhance class="mt-1.5 grid grid-cols-4 gap-1.5">
+						<form method="POST" action="?/setSpeed" use:enhance={pinEnhance()} class="mt-1.5 grid grid-cols-4 gap-1.5">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							{#each SPEED as s}
@@ -278,12 +311,12 @@
 					</div>
 
 					<div class="mt-4 flex gap-3">
-						<form method="POST" action="?/complete" use:enhance class="flex-1">
+						<form method="POST" action="?/complete" use:enhance={pinEnhance()} class="flex-1">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-secondary btn-lg w-full"><Icon name="check" size={20} /> Done</button>
 						</form>
-						<form method="POST" action="?/stop" use:enhance onsubmit={(e) => { if (!confirm('Stop this print on the printer?')) e.preventDefault(); }}>
+						<form method="POST" action="?/stop" use:enhance={pinEnhance()} onsubmit={(e) => { if (!confirm('Stop this print on the printer?')) e.preventDefault(); }}>
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-ghost btn-lg text-danger"><Icon name="x" size={20} /> Stop</button>
@@ -292,7 +325,7 @@
 				{:else if p.status === 'finished'}
 					<div class="mt-5 flex gap-4">
 						{#if p.modelId}
-							<button type="button" onclick={() => open3d(p)} title="Tap for a 3D view"
+							<button type="button" onclick={() => open3d(p.modelId, p.modelName ?? p.jobName ?? 'Print', (p.colorRequest ?? [])[0]?.colorHex)} title="Tap for a 3D view"
 								class="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-warm-200 bg-[#2b2b2b] ring-spark transition hover:ring-2">
 								{#if img}<img src={img} alt="" class="h-full w-full object-cover" />{/if}
 								<span class="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 bg-ink/60 py-1 text-xs font-semibold text-white"><Icon name="box" size={14} /> 3D</span>
@@ -314,7 +347,7 @@
 					<div class="mt-8 text-center">
 						<p class="text-3xl font-bold text-spark-deep">Starting…</p>
 						<p class="mt-2 truncate text-lg text-muted-ink">{p.modelName ?? p.jobName ?? 'Sending file to the printer'}</p>
-						<form method="POST" action="?/stop" use:enhance class="mt-4">
+						<form method="POST" action="?/stop" use:enhance={pinEnhance()} class="mt-4">
 							<input type="hidden" name="jobId" value={p.jobId} />
 							{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 							<button class="btn btn-ghost btn-lg text-danger">Cancel</button>
@@ -340,7 +373,7 @@
 							<Icon name="spool" size={16} /> Filament
 						</span>
 						{#if canUnload(p)}
-							<form method="POST" action="?/unloadFilament" use:enhance onsubmit={(e) => { if (!confirm(`Unload the loaded filament on ${p.name}?`)) e.preventDefault(); }}>
+							<form method="POST" action="?/unloadFilament" use:enhance={pinEnhance()} onsubmit={(e) => { if (!confirm(`Unload the loaded filament on ${p.name}?`)) e.preventDefault(); }}>
 								<input type="hidden" name="printerId" value={p.id} />
 								{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
 								<button class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold text-soft-ink transition-colors hover:bg-warm-100"><Icon name="refresh" size={15} /> Unload</button>
@@ -386,6 +419,50 @@
 		{/each}
 	</div>
 
+	<!-- Awaiting approval — approve on the spot with the PIN -->
+	{#if data.pending.length}
+		<div class="mt-8">
+			<p class="mb-3 text-base font-semibold uppercase tracking-wide text-[#9c5a00]">Awaiting approval · {data.pending.length}</p>
+			<div class="grid gap-4" style="grid-template-columns: repeat({cols}, minmax(0, 1fr));">
+				{#each data.pending as j}
+					{@const pc = (j.colorRequest ?? [])[0]?.colorHex}
+					{@const pimg = thumb(j.modelId, j.hasThumb)}
+					<div class="card border-warning/40 p-5 ring-1 ring-warning/40">
+						<div class="flex gap-4">
+							{#if j.modelId}
+								<button type="button" onclick={() => open3d(j.modelId, j.modelName ?? j.name, pc)} title="Tap for a 3D view"
+									class="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-warm-200 bg-[#2b2b2b] ring-spark transition hover:ring-2">
+									{#if pimg}<img src={pimg} alt="" class="h-full w-full object-cover" />{/if}
+									<span class="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 bg-ink/60 py-0.5 text-[11px] font-semibold text-white"><Icon name="box" size={12} /> 3D</span>
+								</button>
+							{/if}
+							<div class="min-w-0 flex-1">
+								<div class="flex items-center gap-2">
+									{#if pc}<span class="h-5 w-5 shrink-0 rounded-full border border-warm-300" style="background:{pc}"></span>{/if}
+									<p class="truncate text-lg font-bold text-ink">{j.name}</p>
+								</div>
+								<p class="mt-0.5 truncate text-base text-muted-ink">{j.ownerName ?? '—'}</p>
+								<p class="mt-1 text-sm text-muted-ink">{Math.round(Number(j.grams ?? 0))} g{j.timeSec ? ` · ${remaining(Math.round(j.timeSec / 60))}` : ''}</p>
+							</div>
+						</div>
+						<div class="mt-4 flex gap-3">
+							<form method="POST" action="?/approve" use:enhance={pinEnhance()} class="flex-1">
+								<input type="hidden" name="jobId" value={j.id} />
+								{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
+								<button class="btn btn-primary btn-lg w-full !text-lg"><Icon name="check" size={20} /> Approve</button>
+							</form>
+							<form method="POST" action="?/reject" use:enhance={pinEnhance()} onsubmit={(e) => { if (!confirm(`Reject ${j.name}?`)) e.preventDefault(); }}>
+								<input type="hidden" name="jobId" value={j.id} />
+								{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
+								<button class="btn btn-ghost btn-lg text-danger"><Icon name="x" size={20} /></button>
+							</form>
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Queue -->
 	{#if data.queue.length}
 		<div class="mt-10">
@@ -414,7 +491,7 @@
 		<form
 			method="POST"
 			action={edit.slotId ? '?/saveSlot' : '?/setSpool'}
-			use:enhance={() => async ({ update, result }) => { await update({ reset: false }); if (result.type === 'success') modalOpen = false; }}
+			use:enhance={pinEnhance(() => (modalOpen = false))}
 			class="space-y-5"
 		>
 			{#if data.kiosk}<input type="hidden" name="kiosk" value={data.kioskToken} />{/if}
@@ -468,6 +545,24 @@
 			</div>
 		</form>
 	</Modal>
+{/if}
+
+<!-- PIN gate for dangerous actions -->
+{#if pinModalOpen}
+	<div class="fixed inset-0 z-[85] flex items-center justify-center bg-ink/70 p-4">
+		<div class="card w-full max-w-xs p-6 text-center">
+			<p class="text-lg font-semibold text-ink">Enter PIN</p>
+			<p class="mt-1 text-sm text-muted-ink">This action needs the lab PIN.</p>
+			<!-- svelte-ignore a11y_autofocus -->
+			<input type="password" inputmode="numeric" autocomplete="off" autofocus bind:value={pinInput} placeholder="PIN"
+				class="input mt-4 text-center text-2xl tracking-[0.4em]" onkeydown={(e) => { if (e.key === 'Enter') submitPin(); }} />
+			{#if pinError}<p class="mt-2 text-sm font-medium text-danger">{pinError}</p>{/if}
+			<div class="mt-5 flex gap-2">
+				<button type="button" class="btn btn-secondary flex-1" onclick={() => { pinModalOpen = false; pinForm = null; }}>Cancel</button>
+				<button type="button" class="btn btn-primary flex-1" disabled={!pinInput.trim()} onclick={submitPin}>Confirm</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <!-- Small, unobtrusive exit-kiosk button (PIN-gated). Re-enable from Admin → Kiosk. -->

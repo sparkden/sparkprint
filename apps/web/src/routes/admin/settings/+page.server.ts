@@ -4,12 +4,17 @@ import { fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { orgs } from '$lib/server/db/schema';
 import { requireAdmin } from '$lib/server/guards';
+import { getSetting, setSetting } from '$lib/server/settings';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireAdmin(locals.user);
 	const [org] = await db.select().from(orgs).where(eq(orgs.id, locals.user!.orgId)).limit(1);
-	return { org };
+	return {
+		org,
+		kioskPin: (await getSetting('kiosk.pin')) || '2010',
+		kioskGuardActions: (await getSetting('kiosk.guardActions')) !== '0' // default on
+	};
 };
 
 const optInt = z.preprocess(
@@ -29,6 +34,9 @@ const schema = z.object({
 	staffJobLimit: optInt,
 	// Let staff & admins skip the approval queue even when approval mode is on.
 	bypassApprovalStaff: z.coerce.boolean(),
+	// Kiosk PIN + whether it's required to run dangerous actions (approve, stop, AMS…) on the board.
+	kioskPin: z.preprocess((v) => (v == null ? '' : String(v).trim()), z.string().regex(/^\d{4,8}$/, 'PIN must be 4–8 digits')),
+	kioskGuardActions: z.coerce.boolean(),
 	// Public URL students scan on the kiosk QR to reach the app on their phones.
 	appUrl: z.preprocess(
 		(v) => (v ? String(v).trim() : ''),
@@ -44,7 +52,8 @@ export const actions: Actions = {
 			...raw,
 			queueEnabled: raw.queueEnabled === 'on',
 			approvalMode: raw.approvalMode === 'on',
-			bypassApprovalStaff: raw.bypassApprovalStaff === 'on'
+			bypassApprovalStaff: raw.bypassApprovalStaff === 'on',
+			kioskGuardActions: raw.kioskGuardActions === 'on'
 		};
 		const parsed = schema.safeParse(form);
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
@@ -71,6 +80,10 @@ export const actions: Actions = {
 				updatedAt: new Date()
 			})
 			.where(eq(orgs.id, locals.user!.orgId));
+
+		// Kiosk PIN + guard toggle live in the key-value settings the kiosk reads.
+		await setSetting('kiosk.pin', d.kioskPin);
+		await setSetting('kiosk.guardActions', d.kioskGuardActions ? '1' : '0');
 
 		return { success: true };
 	}

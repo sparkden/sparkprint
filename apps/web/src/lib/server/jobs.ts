@@ -407,7 +407,7 @@ export async function submitJob(input: SubmitInput) {
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-export async function approveJob(jobId: string, orgId: string, actorId: string, note?: string) {
+export async function approveJob(jobId: string, orgId: string, actorId?: string | null, note?: string) {
 	const [job] = await db
 		.select()
 		.from(printJobs)
@@ -416,7 +416,7 @@ export async function approveJob(jobId: string, orgId: string, actorId: string, 
 	if (!job || job.status !== 'pending_approval') return { ok: false, error: 'Job is not pending approval' };
 	await db
 		.update(printJobs)
-		.set({ approvedBy: actorId, approvalNote: note ?? null, updatedAt: new Date() })
+		.set({ approvedBy: actorId ?? null, approvalNote: note ?? null, updatedAt: new Date() })
 		.where(eq(printJobs.id, jobId));
 	await logEvent(jobId, 'approval', 'Approved', { note }, actorId);
 	const printerName = await assignPrinter(jobId);
@@ -424,7 +424,7 @@ export async function approveJob(jobId: string, orgId: string, actorId: string, 
 	return { ok: true, status: 'queued' as const, printerName };
 }
 
-export async function rejectJob(jobId: string, orgId: string, actorId: string, note?: string) {
+export async function rejectJob(jobId: string, orgId: string, actorId?: string | null, note?: string) {
 	const [job] = await db
 		.select()
 		.from(printJobs)
@@ -433,7 +433,7 @@ export async function rejectJob(jobId: string, orgId: string, actorId: string, n
 	if (!job || job.status !== 'pending_approval') return { ok: false, error: 'Job is not pending approval' };
 	await db
 		.update(printJobs)
-		.set({ status: 'rejected', approvedBy: actorId, approvalNote: note ?? null, updatedAt: new Date() })
+		.set({ status: 'rejected', approvedBy: actorId ?? null, approvalNote: note ?? null, updatedAt: new Date() })
 		.where(eq(printJobs.id, jobId));
 	await logEvent(jobId, 'approval', 'Rejected', { note }, actorId);
 	return { ok: true };
